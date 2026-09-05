@@ -1,0 +1,1252 @@
+<!-- Live region -->
+<div class="csc-sr-only" role="status" aria-live="polite" aria-atomic="true" id="csc-live"></div>
+
+<!-- Grid instructions -->
+<div id="grid-instructions" class="csc-sr-only">
+  Use arrow keys to navigate cells. Press Enter to sort a column or edit a cell.
+  Space to select a row. Ctrl+Enter on a header cell to open its filter.
+  Ctrl+Left or Right to move a column. Shift+R to enter resize mode on a header cell,
+  then arrow keys to resize, Escape to exit. Tab to leave the grid. Escape to close dialogs.
+  In Editable section, Delete key deletes selected row.
+</div>
+
+<div class="csc-shell">
+
+  <!-- Sidebar -->
+  <nav class="csc-sidebar" aria-label="Grid demo sections">
+    @for (nav of navItems(); track nav.key) {
+      <div class="csc-navlink"
+           role="button" tabindex="0"
+           [attr.aria-pressed]="nav.on"
+           [style.border-left-color]="nav.bar"
+           [style.background]="nav.bg"
+           [style.color]="nav.on ? '#013a4f' : '#5b6b76'"
+           [style.font-weight]="nav.weight"
+           (click)="setSection($any(nav.key))"
+           (keydown.enter)="setSection($any(nav.key))"
+           (keydown.space)="setSection($any(nav.key)); $event.preventDefault()">
+        {{ nav.label }}
+      </div>
+    }
+  </nav>
+
+  <!-- Main -->
+  <div class="csc-main">
+
+    <!-- Page header -->
+    <div class="csc-page-header">
+      <div class="csc-page-title">{{ sectionMeta().title }}</div>
+      <div class="csc-page-subtitle">{{ sectionMeta().subtitle }}</div>
+      <div class="csc-page-tabs">
+        <span class="csc-page-tab" [style.border-bottom-color]="accent()">Overview</span>
+      </div>
+    </div>
+
+    <!-- Keyboard shortcuts legend -->
+    <div class="csc-legend-wrap">
+      <div class="csc-legend-toggle" role="button" tabindex="0"
+           [attr.aria-expanded]="legendOpen()"
+           (click)="toggleLegend()"
+           (keydown.enter)="toggleLegend()"
+           (keydown.space)="toggleLegend(); $event.preventDefault()">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" [attr.stroke]="accent()" stroke-width="1.3" aria-hidden="true">
+          <rect x="1" y="4" width="14" height="8" rx="1.5"/><path d="M4 7h0M7 7h0M10 7h0M4.5 9.5h7"/>
+        </svg>
+        Keyboard shortcuts
+        <span class="csc-legend-arrow" aria-hidden="true" [style.transform]="'rotate(' + legendDeg() + 'deg)'" [style.color]="accent()">▸</span>
+      </div>
+      @if (legendOpen()) {
+        <div class="csc-legend-panel">
+          @for (sc of visibleShortcuts(); track sc.desc) {
+            <div class="csc-legend-item">
+              <span class="csc-legend-keys">@for (k of sc.keys; track k) { <span class="csc-kbd">{{ k }}</span> }</span>
+              <span class="csc-legend-desc">{{ sc.desc }}</span>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Grid card -->
+    <div class="csc-card">
+
+      <!-- Card header -->
+      <div class="csc-card-header">
+        <span class="csc-card-title">Grid Section</span>
+        <div class="csc-copy-link csc-action" role="button" tabindex="0"
+             title="Copy link to this component" [style.color]="copyColor()"
+             (click)="copyLink()" (keydown.enter)="copyLink()" (keydown.space)="copyLink(); $event.preventDefault()">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" [attr.stroke]="accent()" stroke-width="1.4" aria-hidden="true">
+            <rect x="5" y="5" width="8" height="9" rx="1.5"/><path d="M3 11V3a1.5 1.5 0 0 1 1.5-1.5H11"/>
+          </svg>
+          @if (copied()) { <span>✓</span> }
+          <span>{{ copyLabel() }}</span>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="csc-toolbar" role="toolbar" aria-label="Grid actions">
+        <div class="csc-toolbar-left">
+          @for (act of toolbarActions(); track act.label) {
+            <div class="csc-toolbar-btn csc-action" role="button" tabindex="0"
+                 (click)="onToolbarAction(act.label)"
+                 (keydown.enter)="onToolbarAction(act.label)"
+                 (keydown.space)="onToolbarAction(act.label); $event.preventDefault()">
+              <span class="csc-toolbar-icon" [style.color]="accent()">{{ act.icon }}</span>{{ act.label }}
+            </div>
+          }
+        </div>
+        <div class="csc-toolbar-right">
+          <!-- Text size stepper. Grouped and labelled so the two buttons read as
+               one control; the current size is exposed as text rather than only
+               by which button looks pressed. -->
+          <div class="csc-textsize" role="group" aria-label="Text size">
+            <button type="button" class="csc-textsize-btn"
+                    aria-label="Decrease text size"
+                    [disabled]="!canShrinkText()"
+                    (click)="stepTextSize(-1)">−</button>
+            <span class="csc-textsize-value">Text size</span>
+            <button type="button" class="csc-textsize-btn"
+                    aria-label="Increase text size"
+                    [disabled]="!canGrowText()"
+                    (click)="stepTextSize(1)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Selection bar -->
+      @if (hasSelection()) {
+        <div class="csc-sel-bar">
+          <span class="csc-sel-badge" [style.background]="accent()">{{ selCount() }} selected</span>
+          <span class="csc-sel-note">{{ selectionNote() }}</span>
+          <div style="flex:1"></div>
+          <span class="csc-sel-clear csc-action" role="button" tabindex="0"
+                (click)="clearSelection()" (keydown.enter)="clearSelection()">Clear selection</span>
+        </div>
+      }
+
+      <!-- Every column hidden: explain it instead of showing a blank grid -->
+      @if (noColumnsVisible()) {
+        <div class="csc-grid-empty" role="status">
+          <p class="csc-grid-empty-title">No columns selected</p>
+          <p class="csc-grid-empty-text">Every column is currently hidden. Use Choose columns to show them again.</p>
+          <button type="button" class="csc-btn-primary" [style.background]="accent()" (click)="openChooser()">Choose columns</button>
+        </div>
+      }
+
+      <!-- All Features data bar: global search, source, mode, refresh, export.
+           Only this section talks to a paging API, so the controls that only
+           make sense against one are scoped to it rather than shown disabled
+           everywhere else. -->
+      @if (isAllFeatures()) {
+        <div class="csc-data-bar">
+          <div class="csc-search">
+            <label class="csc-field-label" for="all-search-input">Search records</label>
+            <div class="csc-search-wrap">
+              <input id="all-search-input" type="search" class="csc-search-input"
+                     autocomplete="off" placeholder="Entity, document, city, owner…"
+                     aria-describedby="all-search-hint"
+                     [value]="searchTerm()"
+                     (input)="onSearchInput($any($event.target).value)">
+              @if (searchTerm()) {
+                <button type="button" class="csc-search-clear" aria-label="Clear search"
+                        (click)="clearSearch()">×</button>
+              }
+            </div>
+            <span id="all-search-hint" class="csc-sr-only">Results update automatically as you type.</span>
+          </div>
+
+          <div class="csc-field">
+            <label class="csc-field-label" for="all-source">Data source</label>
+            <select id="all-source" class="csc-select"
+                    [value]="ds.adapterId()"
+                    (change)="setDataSource($any($event.target).value)">
+              @for (a of ds.adapters; track a.id) {
+                <option [value]="a.id">{{ a.label }}</option>
+              }
+            </select>
+          </div>
+
+          <fieldset class="csc-mode">
+            <legend class="csc-field-label">Row loading</legend>
+            <label class="csc-radio">
+              <input type="radio" name="paging-mode" value="paged"
+                     [checked]="ds.mode() === 'paged'"
+                     (change)="setPagingMode('paged')"> Paged
+            </label>
+            <label class="csc-radio">
+              <input type="radio" name="paging-mode" value="infinite"
+                     [checked]="ds.mode() === 'infinite'"
+                     (change)="setPagingMode('infinite')"> Infinite
+            </label>
+          </fieldset>
+
+          <div class="csc-data-bar-actions">
+            <button type="button" class="csc-btn-ghost" (click)="refreshData()"
+                    [disabled]="ds.loading()">↻ Refresh</button>
+            <button type="button" class="csc-btn-ghost" (click)="exportCsv()"
+                    [disabled]="exporting() || ds.initialLoading()">
+              {{ exporting() ? 'Exporting…' : '↓ Export CSV' }}
+            </button>
+            <button type="button" class="csc-btn-ghost" (click)="simulateError()">⚠ Simulate error</button>
+          </div>
+
+          <p class="csc-data-status" role="status">{{ serverStatusText() }}</p>
+        </div>
+
+        @if (filterChips().length) {
+          <div class="csc-chips" role="group" aria-label="Active filters">
+            @for (chip of filterChips(); track chip.field) {
+              <span class="csc-chip">
+                <span class="csc-chip-text">{{ chip.label }}: {{ chip.text }}</span>
+                <button type="button" class="csc-chip-x"
+                        [attr.aria-label]="'Remove ' + chip.label + ' filter'"
+                        (click)="removeChip(chip.field)">×</button>
+              </span>
+            }
+            <button type="button" class="csc-btn-ghost csc-chip-clear"
+                    (click)="clearAllServerFilters()">Clear all filters</button>
+          </div>
+        }
+
+        @if (ds.error()) {
+          <div class="csc-error-panel" role="alert">
+            <p class="csc-error-title">Could not load records</p>
+            <p class="csc-error-text">{{ ds.error() }}</p>
+            <button type="button" class="csc-btn-primary" [style.background]="accent()"
+                    (click)="retryLoad()">Retry</button>
+          </div>
+        }
+      }
+
+      <!-- Grid scroll area -->
+      <div class="csc-grid-scroll" [class.csc-hidden]="noColumnsVisible()">
+        <div class="csc-grid-inner">
+          <div role="grid"
+               [attr.aria-label]="gridLabel()"
+               aria-describedby="grid-instructions"
+               [attr.aria-rowcount]="ariaRowCount()"
+               [attr.aria-colcount]="ariaColCount()"
+               [attr.aria-busy]="ds.loading() && isAllFeatures() ? 'true' : null"
+               tabindex="-1"
+               (keydown)="onGridKeyDown($event)">
+
+            <!-- Header row -->
+            <div role="row" aria-rowindex="1" class="csc-header-row" [style.grid-template-columns]="gridCols()">
+
+              <!-- Expand col header (sections that support expandable rows) -->
+              @if (canExpand()) {
+                <div role="columnheader" id="gc-header-expand-col"
+                     [attr.tabindex]="expandColHeaderTabIndex()"
+                     class="csc-gridcell csc-header-action" aria-label="Expand actions"
+                     [class.csc-pinned-left]="pinLeft('expand-col') !== null"
+                     [class.csc-pin-edge-left]="isPinEdgeLeft('expand-col')"
+                     [style.left.px]="pinLeft('expand-col')"
+                     [attr.aria-description]="expandColHeaderDesc()"
+                     (focus)="onCellFocus('header', 'expand-col')">
+                  <button type="button" class="csc-ico csc-ico-btn" tabindex="-1"
+                          [attr.title]="allExpanded() ? 'Collapse all rows' : 'Expand all rows'"
+                          [attr.aria-label]="allExpanded() ? 'Collapse all rows' : 'Expand all rows'"
+                          [attr.aria-expanded]="allExpanded()"
+                          [style.color]="accent()"
+                          [style.transform]="'rotate(' + (allExpanded() ? 90 : 0) + 'deg)'"
+                          style="font-size:18px;line-height:1;transition:transform .15s"
+                          (click)="toggleExpandAll(); $event.stopPropagation()">›</button>
+                </div>
+              }
+
+              <!-- Lead cell of the header row - a gridcell, NOT a columnheader.
+                   A columnheader is the LABEL for the data beneath it, and
+                   screen readers echo that label on every row as the user
+                   moves through column 1 - which is how "Select all rows"
+                   was being repeated on every single row. This cell labels
+                   nothing; it holds an action control. As role=gridcell it
+                   has no header title to echo, so the repetition disappears
+                   entirely. aria-colindex keeps the grid geometry intact.
+                   The one trade-off: a "read column header" command on
+                   column 1 returns nothing - correct, since the column has
+                   no data meaning.
+
+                   Focus lives on the CELL; the tri-state checkbox inside is
+                   deliberately NOT focusable. NVDA auto-switches to focus
+                   mode for gridcells but never for checkboxes, so a focused
+                   checkbox left arrow keys with the virtual cursor and grid
+                   navigation died on this one cell. With the cell focused,
+                   the embedded checkbox is announced from content - role,
+                   checked/mixed state, and the count via aria-describedby.
+
+                   No key bindings on the checkbox on purpose: the grid's own
+                   key handler already maps Space and Enter on this cell to
+                   selectAll(); binding here too would toggle twice. -->
+              <div role="gridcell" aria-colindex="1" id="gc-header-lead"
+                   [attr.tabindex]="leadHeaderTabIndex()"
+                   class="csc-gridcell csc-header-lead"
+                   [class.csc-pinned-left]="pinLeft('lead') !== null"
+                   [class.csc-pin-edge-left]="isPinEdgeLeft('lead')"
+                   [style.left.px]="pinLeft('lead')"
+                   (focus)="onLeadHeaderFocus()">
+                <div role="checkbox"
+                     [attr.aria-checked]="selectAllAriaChecked()"
+                     [attr.aria-controls]="rowSelectIds()"
+                     aria-label="Select all rows"
+                     aria-describedby="selectall-count-desc"
+                     class="csc-ico csc-ico-btn" title="Select all rows"
+                     (click)="selectAll()">
+                  <div class="csc-checkbox" aria-hidden="true"
+                       [style.border-color]="selectAllBorder()"
+                       [style.background]="selectAllBg()">
+                    @if (allSelected()) { <span class="csc-chk-mark">✓</span> }
+                    @else if (someSelected()) { <span class="csc-chk-mark csc-chk-indeterminate">−</span> }
+                  </div>
+                </div>
+                <span id="selectall-count-desc" class="csc-sr-only">{{ selectAllCountDesc() }}</span>
+              </div>
+
+              <!-- Delete col header (sections that support row deletion) -->
+              @if (canDelete()) {
+                <div role="columnheader" id="gc-header-delete-col"
+                     [attr.tabindex]="deleteColHeaderTabIndex()"
+                     class="csc-gridcell csc-header-action" aria-label="Delete actions"
+                     [class.csc-pinned-left]="pinLeft('delete-col') !== null"
+                     [class.csc-pin-edge-left]="isPinEdgeLeft('delete-col')"
+                     [style.left.px]="pinLeft('delete-col')"
+                     [attr.aria-description]="deleteColHeaderDesc()"
+                     (focus)="onCellFocus('header', 'delete-col')">
+                  <button type="button" class="csc-ico csc-ico-btn csc-delete-btn" tabindex="-1"
+                          [disabled]="!hasSelection()"
+                          [attr.title]="hasSelection() ? 'Delete ' + selCount() + ' selected' : 'Delete selected (select rows first)'"
+                          [attr.aria-label]="hasSelection() ? 'Delete ' + selCount() + ' selected records' : 'Delete selected records, no rows selected'"
+                          [style.opacity]="hasSelection() ? 1 : 0.35"
+                          (click)="openBulkDeleteConfirm($event)">
+                    <svg width="13" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                      <path d="M2.5 4.5h11"/>
+                      <path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/>
+                      <path d="M4 4.5l.6 8.4a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.4"/>
+                    </svg>
+                  </button>
+                </div>
+              }
+
+              <!-- Data column headers -->
+              @for (col of columns(); track col.field) {
+                <div role="columnheader"
+                     [attr.aria-colindex]="col.ariaColIndex"
+                     [attr.aria-sort]="col.ariaSort"
+                     [id]="col.cellId"
+                     [attr.tabindex]="col.tabIndex"
+                     [attr.aria-label]="col.headerAriaLabel"
+                     [attr.aria-description]="col.headerAriaDesc"
+                     class="csc-gridcell csc-header-cell"
+                     [class.csc-header-resizing]="col.isResizing"
+                     [class.csc-pinned-left]="pinLeft(col.field) !== null"
+                     [class.csc-pinned-right]="pinRight(col.field) !== null"
+                     [class.csc-pin-edge-left]="isPinEdgeLeft(col.field)"
+                     [class.csc-pin-edge-right]="isPinEdgeRight(col.field)"
+                     [style.left.px]="pinLeft(col.field)"
+                     [style.right.px]="pinRight(col.field)"
+                     [attr.draggable]="col.draggable"
+                     [style.box-shadow]="col.dropShadow"
+                     [style.opacity]="col.dragOpacity"
+                     (focus)="onCellFocus('header', col.field)"
+                     (click)="!_isDragging && sortBy(col.field, $event.shiftKey)"
+                     (dragstart)="onColDragStart(col.field, $event)"
+                     (dragover)="onColDragOver(col.field, $event)"
+                     (drop)="onColDrop(col.field, $event)"
+                     (dragend)="onColDragEnd()">
+
+                  <div class="csc-header-content">
+                    @if (col.draggable) {
+                      <span class="csc-ico csc-drag-handle" title="Drag to reorder" [style.color]="accent()"
+                            (click)="$event.stopPropagation()">
+                        <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
+                          <circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/>
+                          <circle cx="2" cy="6.5" r="1.3"/><circle cx="7" cy="6.5" r="1.3"/>
+                          <circle cx="2" cy="11" r="1.3"/><circle cx="7" cy="11" r="1.3"/>
+                        </svg>
+                      </span>
+                    }
+
+                    <span class="csc-col-label">{{ col.label }}</span>
+
+                    <!-- Editable affordance. Decorative only: the same fact is
+                         spoken via the header's aria-description and, at the
+                         point of use, via aria-readonly on non-editable cells. -->
+                    @if (col.showEditableIcon) {
+                      <span class="csc-editable-ico" aria-hidden="true" [style.color]="accent()"
+                            title="Editable column">
+                        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
+                        </svg>
+                      </span>
+                    }
+
+                    <!-- Sort icon. Shift adds this column to the sort instead
+                         of replacing it (server-backed sections only). -->
+                    <span class="csc-ico csc-ico-btn csc-sort-btn" [attr.title]="col.sortTitle" [style.color]="accent()"
+                          [style.background]="col.sortBg" [style.border]="col.sortBorder"
+                          (click)="sortBy(col.field, $event.shiftKey); $event.stopPropagation()">
+                      @if (col.isAsc) { ▲ } @else if (col.isDesc) { ▼ } @else { ⇅ }
+                      @if (col.sortLevel) { <span class="csc-sort-level" aria-hidden="true">{{ col.sortLevel }}</span> }
+                    </span>
+
+                    <!-- Filter icon -->
+                    <span class="csc-ico csc-ico-btn csc-filter-btn" title="Filter column (Ctrl+Enter)"
+                          [style.color]="accent()" [style.background]="col.filterBg" [style.border]="col.filterBorder"
+                          (click)="openFilter(col.field, $any($event.currentTarget)); $event.stopPropagation()">
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M1 2.5h14l-5.4 6.6v4.2l-3.2 1.4V9.1z"/>
+                      </svg>
+                    </span>
+
+                    <!-- Column menu -->
+                    @if (col.showMenu) {
+                      <span class="csc-ico csc-ico-btn csc-menu-btn" title="Column menu (Shift+M)" [style.color]="accent()"
+                            (click)="openMenu(col.field, $any($event.currentTarget)); $event.stopPropagation()">⋮</span>
+                    }
+
+                    <!-- Pinned indicator -->
+                    @if (col.isPinned) {
+                      <span class="csc-ico" title="Pinned {{ col.pinnedDir }}" [style.color]="accent()">
+                        <svg width="11" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                          <path d="M8 1.5c2.2 0 4 1.7 4 3.9 0 2.9-4 8.6-4 8.6S4 8.3 4 5.4c0-2.2 1.8-3.9 4-3.9z"/>
+                          <circle cx="8" cy="5.3" r="1.6" fill="#F5F5F5"/>
+                        </svg>
+                      </span>
+                    }
+                  </div>
+
+                  <!-- Resize handle — WAI-ARIA separator pattern.
+                       Deliberately OUTSIDE .csc-header-content so its -9px grab
+                       overhang is not clipped by that wrapper's overflow:hidden. -->
+                  @if (col.resizable) {
+                    <span class="csc-resize"
+                         role="separator"
+                         aria-orientation="vertical"
+                         [attr.aria-label]="col.resizerAriaLabel"
+                         [attr.aria-valuenow]="col.resizerAriaValueNow"
+                         aria-valuemin="60"
+                         aria-valuemax="800"
+                         tabindex="-1"
+                         title="Drag to resize. Focus header and press Shift+R for keyboard resize."
+                         (mousedown)="startResize(col.field, $event); $event.stopPropagation()"
+                         (click)="$event.stopPropagation()"
+                         (keydown.escape)="exitResizeMode(); $event.stopPropagation()">
+                      <span class="csc-resize-grip"></span>
+                    </span>
+                  }
+                </div>
+              }
+            </div>
+
+            <!-- Data rows.
+                 In infinite mode only a window of the loaded rows is rendered;
+                 the two spacers stand in for the rest so the scrollbar still
+                 measures the full set. They carry role=presentation because a
+                 role=grid may only own rows. aria-rowindex stays absolute, so
+                 what a screen reader reports never depends on the window. -->
+            @if (rowWindow().padTop) {
+              <div role="presentation" class="csc-vspacer" [style.height.px]="rowWindow().padTop"></div>
+            }
+            @for (row of viewRows(); track row.id) {
+              <div class="csc-row-wrap">
+                <div class="csc-row"
+                     role="row"
+                     [attr.aria-rowindex]="row.ariaRowIndex"
+                     [attr.aria-selected]="row.selected"
+                     [attr.aria-description]="row.rowAriaDesc"
+                     tabindex="-1"
+                     [style.grid-template-columns]="gridCols()"
+                     [style.min-height.px]="rowH()"
+                     [style.background]="row.bg">
+
+                  <!-- Expand cell (Expandable section only) -->
+                  @if (row.showChevron) {
+                    <div role="gridcell"
+                         [id]="row.expandCellId"
+                         [attr.tabindex]="row.expandTabIndex"
+                         class="csc-gridcell csc-action-cell"
+                         [class.csc-pinned-left]="pinLeft('expand-col') !== null"
+                         [class.csc-pin-edge-left]="isPinEdgeLeft('expand-col')"
+                         [style.left.px]="pinLeft('expand-col')"
+                         (focus)="onCellFocus(row.id, 'expand-col')">
+                      <button type="button" class="csc-ico csc-ico-btn" title="Expand row"
+                              tabindex="-1"
+                              [attr.aria-label]="(row.isExpanded ? 'Collapse' : 'Expand') + ' details for ' + row.entity"
+                              [attr.aria-expanded]="row.isExpanded"
+                              [attr.aria-controls]="row.isExpanded ? ('detail-' + row.id) : null"
+                              [style.color]="accent()"
+                              [style.transform]="'rotate(' + row.chevronDeg + 'deg)'"
+                              style="font-size:18px;line-height:1;transition:transform .15s"
+                              (click)="toggleExpand(row.id); $event.stopPropagation()">›</button>
+                    </div>
+                  }
+
+                  <!-- Lead cell: checkbox only -->
+                  <div role="gridcell" aria-colindex="1"
+                       [id]="row.leadCellId"
+                       [attr.tabindex]="row.leadTabIndex"
+                       class="csc-gridcell csc-lead-cell"
+                       [class.csc-pinned-left]="pinLeft('lead') !== null"
+                       [class.csc-pin-edge-left]="isPinEdgeLeft('lead')"
+                       [style.left.px]="pinLeft('lead')"
+                       (focus)="onCellFocus(row.id, 'lead')">
+                  <!-- Row select checkbox. The name FLIPS - "Select X" /
+                       "Deselect X" - because it is the only state channel
+                       that actually reaches a screen reader user here: focus
+                       mode announces the focused gridcell's name and
+                       coordinates only, and never walks into the cell to
+                       speak the embedded checkbox's aria-checked (verified
+                       with NVDA in both Chrome and Firefox; an earlier
+                       revision assumed content rendering would carry the
+                       state, and it does not). role=checkbox + aria-checked
+                       stay for browse-mode reading and automated checks -
+                       and the pair is not contradictory with the flipped
+                       name: "Deselect X, checked" reads as action + state.
+                       The word "checkbox" must NOT be baked into the name;
+                       the role attribute already provides it where roles are
+                       spoken, and baking it in would double-announce.
+                       Not focusable - focus stays on the gridcell (NVDA
+                       focus-mode rule). Row-level aria-selected stays; the
+                       "not selected" NVDA speaks per-cell in Firefox is
+                       Gecko exposing a selectable state on grid cells, not
+                       something this markup can remove. -->
+                  <div class="csc-ico csc-ico-btn" role="checkbox"
+                       [attr.aria-checked]="row.selected"
+                       [attr.aria-label]="(row.selected ? 'Deselect ' : 'Select ') + row.entity"
+                       [attr.title]="row.selected ? 'Deselect row' : 'Select row'"
+                       (click)="toggleSelect(row.id); $event.stopPropagation()">
+                    <div class="csc-checkbox" aria-hidden="true" [style.border-color]="row.boxBorder" [style.background]="row.boxBg">
+                      @if (row.selected) { <span class="csc-chk-mark">✓</span> }
+                    </div>
+                  </div>
+                  </div>
+
+                  <!-- Delete cell (sections that support row deletion) -->
+                  @if (canDelete()) {
+                    <div role="gridcell"
+                         [id]="row.deleteCellId"
+                         [attr.tabindex]="row.deleteTabIndex"
+                         class="csc-gridcell csc-action-cell"
+                         [class.csc-pinned-left]="pinLeft('delete-col') !== null"
+                         [class.csc-pin-edge-left]="isPinEdgeLeft('delete-col')"
+                         [style.left.px]="pinLeft('delete-col')"
+                         (focus)="onCellFocus(row.id, 'delete-col')">
+                      @if (row.showDelete) {
+                        <button type="button" class="csc-action-btn csc-delete-btn"
+                                tabindex="-1"
+                                [attr.aria-label]="'Delete ' + row.entity"
+                                title="Delete row (or press Delete key when row is selected)"
+                                (click)="openDeleteConfirm(row.id, $event); $event.stopPropagation()">
+                          <svg width="13" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                            <path d="M2.5 4.5h11"/>
+                            <path d="M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5"/>
+                            <path d="M4 4.5l.6 8.4a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.4"/>
+                          </svg>
+                        </button>
+                      }
+                    </div>
+                  }
+
+                  <!-- Data cells -->
+                  @for (cell of row.cells; track cell.field) {
+                    <div [attr.role]="cell.isRowHeader ? 'rowheader' : 'gridcell'"
+                         [attr.aria-colindex]="cell.ariaColIndex"
+                         [id]="cell.cellId"
+                         [attr.tabindex]="cell.tabIndex"
+                         [attr.aria-readonly]="cell.ariaReadonly"
+                         [attr.aria-description]="cell.cellAriaDesc"
+                         class="csc-gridcell csc-data-cell"
+                         [class.csc-cell-dirty]="cell.dirty"
+                         [class.csc-cell-editable]="cell.editable"
+                         [class.csc-pinned-left]="pinLeft(cell.field) !== null"
+                         [class.csc-pinned-right]="pinRight(cell.field) !== null"
+                         [class.csc-pin-edge-left]="isPinEdgeLeft(cell.field)"
+                         [class.csc-pin-edge-right]="isPinEdgeRight(cell.field)"
+                         [style.left.px]="pinLeft(cell.field)"
+                         [style.right.px]="pinRight(cell.field)"
+                         (dblclick)="cell.editable ? startCellEdit(row.id, cell.field) : null"
+                         (focus)="onCellFocus(row.id, cell.field)">
+                      @if (cell.isLink) {
+                        <svg width="12" height="13" viewBox="0 0 16 16" fill="none" [attr.stroke]="accent()" stroke-width="1.3" style="flex:none" aria-hidden="true">
+                          <path d="M4 1.5h5l3 3v10H4z"/><path d="M9 1.5v3h3"/>
+                        </svg>
+                        <a class="csc-doc-link" tabindex="-1"
+                           (click)="showToast('Opening document ' + row.doc); $event.preventDefault()">{{ cell.value }}</a>
+                      } @else if (cell.isEditing) {
+                        @if (cell.isCombo) {
+                          <div class="csc-combo">
+                            <input class="csc-edit-input csc-combo-input" type="text" tabindex="-1"
+                                   role="combobox" autocomplete="off" aria-autocomplete="list"
+                                   [attr.aria-label]="'Edit ' + colLabel(cell.field) + ' for ' + row.entity"
+                                   [attr.aria-expanded]="isComboOpen(row.id, cell.field)"
+                                   [attr.aria-controls]="comboListId"
+                                   [attr.aria-activedescendant]="isComboOpen(row.id, cell.field) ? comboActiveId() : null"
+                                   [value]="cell.draft"
+                                   [style.border-color]="accent()"
+                                   (input)="onComboInput(row.id, cell.field, $any($event.target).value)"
+                                   (keydown)="onComboKeyDown($event, row.id, cell.field)"
+                                   (blur)="onComboBlur(row.id, cell.field)"/>
+                            <button type="button" class="csc-combo-toggle" tabindex="-1" aria-hidden="true"
+                                    [style.color]="accent()"
+                                    (mousedown)="$event.preventDefault()"
+                                    (click)="openComboCell(row.id, cell.field)">
+                              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 6l5 5 5-5"/>
+                              </svg>
+                            </button>
+                          </div>
+                        } @else {
+                          <input class="csc-edit-input" tabindex="-1"
+                                 [attr.aria-label]="'Edit ' + colLabel(cell.field) + ' for ' + row.entity"
+                                 [value]="cell.draft"
+                                 [style.border-color]="accent()"
+                                 (input)="editCellField(row.id, cell.field, $any($event.target).value)"
+                                 (keydown)="onCellEditKeyDown($event, row.id, cell.field)"
+                                 (blur)="commitCell(row.id, cell.field)"/>
+                        }
+                      } @else {
+                        <span class="csc-cell-text">{{ cell.value }}</span>
+                        @if (cell.isCombo) {
+                          <button type="button" class="csc-cell-edit-btn csc-cell-combo-btn" tabindex="-1"
+                                  [attr.aria-label]="'Choose ' + colLabel(cell.field) + ' for ' + row.entity"
+                                  [attr.title]="'Choose ' + colLabel(cell.field)"
+                                  [style.color]="accent()"
+                                  (click)="openComboCell(row.id, cell.field); $event.stopPropagation()">
+                            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                              <path d="M3 6l5 5 5-5"/>
+                            </svg>
+                          </button>
+                        } @else if (cell.editable) {
+                          <!-- Single-click alternative to double-click. Absolutely
+                               positioned so it never joins the flex row: adding it
+                               as a normal child would eat into the cell's content
+                               width (the cell is overflow:hidden) and skew autosize.
+                               tabindex=-1 keeps the grid a single tab stop. -->
+                          <button type="button" class="csc-cell-edit-btn" tabindex="-1"
+                                  [attr.aria-label]="'Edit ' + colLabel(cell.field) + ' for ' + row.entity"
+                                  [attr.title]="'Edit ' + colLabel(cell.field)"
+                                  [style.color]="accent()"
+                                  (click)="startCellEdit(row.id, cell.field); $event.stopPropagation()">
+                            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                              <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
+                            </svg>
+                          </button>
+                        }
+                      }
+                    </div>
+                  }
+                </div>
+
+                <!-- Expandable detail.
+                     Inside role=grid every child must be a row, so the panel is
+                     a row containing one full-width gridcell. As a bare div it
+                     was an invalid child and screen readers skipped straight
+                     past the content the chevron claims to reveal. -->
+                @if (row.isExpanded) {
+                  <div role="row" class="csc-expand-row">
+                    <div role="gridcell" aria-colindex="1" tabindex="-1"
+                         [id]="'detail-' + row.id"
+                         class="csc-expand-panel">
+                      <div class="csc-expand-title">Entity details — {{ row.entity }}</div>
+                      <div class="csc-expand-grid">
+                        <div class="csc-expand-field"><div class="csc-expand-label">Registered Agent</div><div>{{ row.agent }}</div></div>
+                        <div class="csc-expand-field"><div class="csc-expand-label">Jurisdiction</div><div>{{ row.jurisdiction }}</div></div>
+                        <div class="csc-expand-field">
+                          <div class="csc-expand-label">Filing Status</div>
+                          <div style="display:inline-flex;align-items:center;gap:6px">
+                            <span class="csc-status-dot" [style.background]="row.statusColor"></span>{{ row.status }}
+                          </div>
+                        </div>
+                        <div class="csc-expand-field"><div class="csc-expand-label">Last Updated</div><div>{{ row.updated }}</div></div>
+                      </div>
+
+                      <!-- Child records are fetched per row, on first open. -->
+                      @if (isAllFeatures()) {
+                        @let kids = ds.childrenFor(row.id);
+                        <div class="csc-child-block">
+                          <div class="csc-expand-label">Related filings</div>
+                          @if (!kids || kids.status === 'loading') {
+                            <p class="csc-child-status" role="status">Loading related filings…</p>
+                          } @else if (kids.status === 'error') {
+                            <p class="csc-child-status csc-child-error" role="alert">
+                              {{ kids.message }}
+                              <button type="button" class="csc-btn-ghost" (click)="ds.loadChildren(row.id)">Retry</button>
+                            </p>
+                          } @else if (!kids.rows.length) {
+                            <p class="csc-child-status">No related filings for this entity.</p>
+                          } @else {
+                            <table class="csc-child-table">
+                              <caption class="csc-sr-only">Related filings for {{ row.entity }}</caption>
+                              <thead>
+                                <tr><th scope="col">Filing</th><th scope="col">Filed on</th><th scope="col">State</th><th scope="col">Amount</th></tr>
+                              </thead>
+                              <tbody>
+                                @for (k of kids.rows; track k.id) {
+                                  <tr><td>{{ k.filing }}</td><td>{{ k.filedOn }}</td><td>{{ k.state }}</td><td>{{ k.amount }}</td></tr>
+                                }
+                              </tbody>
+                            </table>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+            @if (rowWindow().padBottom) {
+              <div role="presentation" class="csc-vspacer" [style.height.px]="rowWindow().padBottom"></div>
+            }
+
+            <!-- Skeleton rows: first load only, so the grid keeps its shape
+                 instead of collapsing to nothing and jumping back. -->
+            @if (isAllFeatures() && ds.initialLoading()) {
+              @for (s of skeletonRows(); track s) {
+                <div class="csc-row csc-skeleton-row" aria-hidden="true"
+                     [style.grid-template-columns]="gridCols()"
+                     [style.min-height.px]="rowH()">
+                  @for (c of navCols(); track c) {
+                    <div class="csc-gridcell"><span class="csc-skeleton-bar"></span></div>
+                  }
+                </div>
+              }
+            }
+
+          </div><!-- /role=grid -->
+
+          @if (isAllFeatures() && !ds.initialLoading() && !ds.error() && !viewRows().length) {
+            <div class="csc-grid-empty" role="status">
+              <p class="csc-grid-empty-title">No records match your filters</p>
+              <p class="csc-grid-empty-text">Try a different search term, or clear the filters to see all records.</p>
+              @if (ds.isFiltered()) {
+                <button type="button" class="csc-btn-primary" [style.background]="accent()"
+                        (click)="clearAllServerFilters()">Clear all filters</button>
+              }
+            </div>
+          }
+
+          <!-- Infinite mode still needs a keyboard path: scrolling is not an
+               operable control, so the same action is offered as a button. -->
+          @if (isAllFeatures() && ds.mode() === 'infinite' && !ds.initialLoading()) {
+            <div class="csc-load-more">
+              @if (ds.hasMore()) {
+                <button type="button" class="csc-btn-primary" [style.background]="accent()"
+                        [disabled]="ds.loadingMore()"
+                        (click)="loadMore()">
+                  {{ ds.loadingMore() ? 'Loading…' : 'Load more records' }}
+                </button>
+              }
+              <p class="csc-load-more-status" role="status">
+                {{ ds.rows().length }} of {{ ds.total() }} records loaded
+              </p>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      @if (showPagination()) {
+        <nav class="csc-pagination" aria-label="Grid pagination">
+          <div class="csc-page-size-wrap">
+            <span id="page-size-label" style="color:#075A92;font-weight:600">Items per page</span>
+            <div class="csc-page-size-combo">
+              <button type="button" id="page-size-btn" class="csc-page-size-btn"
+                      role="combobox" aria-haspopup="listbox"
+                      [attr.aria-expanded]="pageSizeOpen()"
+                      aria-controls="page-size-listbox"
+                      [attr.aria-labelledby]="'page-size-label page-size-btn'"
+                      (click)="togglePageSizeMenu()"
+                      (keydown)="onPageSizeBtnKeyDown($event)">
+                {{ currentPageSize() }} <span aria-hidden="true" [style.color]="accent()">▾</span>
+              </button>
+              @if (pageSizeOpen()) {
+                <div class="csc-overlay csc-overlay-transparent" (click)="closePageSizeMenu()"></div>
+                <ul id="page-size-listbox" role="listbox" aria-labelledby="page-size-label"
+                    class="csc-page-size-list"
+                    (keydown)="onPageSizeKeyDown($event)">
+                  @for (opt of pageSizeOpts(); track opt; let oi = $index) {
+                    <li role="option" [id]="'page-size-opt-' + oi"
+                        [attr.aria-selected]="opt === pageSize()"
+                        [attr.tabindex]="oi === pageSizeFocusIdx() ? '0' : '-1'"
+                        class="csc-page-size-opt"
+                        (focus)="pageSizeFocusIdx.set(oi)"
+                        (click)="choosePageSize(opt)"
+                        (keydown.enter)="choosePageSize(opt)"
+                        (keydown.space)="choosePageSize(opt); $event.preventDefault()">
+                      <span class="csc-opt-check" aria-hidden="true">{{ opt === pageSize() ? '✓' : '' }}</span>{{ opt }}
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          </div>
+          <span>{{ rangeText() }}</span>
+          <div style="flex:1"></div>
+          <div class="csc-page-btns">
+            <button type="button" class="csc-page-prev-next" aria-label="Previous page"
+                    [disabled]="atFirstPage()"
+                    (click)="setPage(sliceInfoVal.page - 1)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6"/>
+              </svg>
+            </button>
+            <!-- Tracked by position: with 200 pages the list holds two gaps,
+                 and a value-based key made both of them identical. -->
+            @for (p of pageButtons(); track $index) {
+              @if (p.isGap) { <span class="csc-page-gap">…</span> }
+              @else {
+                <span class="csc-page-num csc-action" role="button" tabindex="0"
+                      [attr.aria-label]="p.ariaLabel" [attr.aria-current]="p.bg !== 'transparent' ? 'page' : null"
+                      [style.background]="p.bg" [style.color]="p.color" [style.font-weight]="p.weight"
+                      (click)="setPage(+p.label - 1)"
+                      (keydown.enter)="setPage(+p.label - 1)">{{ p.label }}</span>
+              }
+            }
+            <button type="button" class="csc-page-prev-next" aria-label="Next page"
+                    [disabled]="atLastPage()"
+                    (click)="setPage(sliceInfoVal.page + 1)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 18l6-6-6-6"/>
+              </svg>
+            </button>
+          </div>
+          <div class="csc-goto">
+            <label for="goto-page-input" style="color:#075A92">Go to page</label>
+            <input id="goto-page-input" type="text" class="csc-goto-input"
+                   [value]="gotoVal()"
+                   (input)="gotoVal.set($any($event.target).value.replace(/[^0-9]/g, ''))"
+                   (keydown.enter)="gotoGo()"/>
+            <span class="csc-action" role="button" tabindex="0" style="color:#075A92;font-weight:700"
+                  (click)="gotoGo()" (keydown.enter)="gotoGo()">Go ›</span>
+          </div>
+        </nav>
+      }
+    </div><!-- /card -->
+  </div><!-- /main -->
+</div><!-- /shell -->
+
+<!-- Column menu popover -->
+@if (menuField()) {
+  <div class="csc-overlay" (click)="closeOverlays()"></div>
+  <div role="menu" [attr.aria-label]="colLabel(menuField()!) + ' column menu'"
+       class="csc-menu-popover"
+       [style.left.px]="menuX()" [style.top.px]="menuY()"
+       (keydown)="onMenuKeyDown($event)"
+       (click)="$event.stopPropagation()">
+    @for (group of menuGroups(); track $index; let gi = $index) {
+      @if (gi > 0) { <div class="csc-menu-divider" role="separator"></div> }
+
+      @if (group.isRadioGroup) {
+        <!-- Sort and Pin are both mutually exclusive choices, so both render
+             through this one path: a labelled radiogroup of radios. Using
+             radiogroup + radio (rather than menuitemradio directly under the
+             menu) is what produces the "1 of 3" position information a screen
+             reader speaks, and the two idioms cannot be mixed - a radiogroup
+             may only own radios. -->
+        <div class="csc-menu-group-label" [id]="group.groupId">{{ group.label }}</div>
+        <div role="radiogroup" [attr.aria-labelledby]="group.groupId">
+          @for (mi of group.items; track mi.label) {
+            <div role="radio" [attr.aria-checked]="mi.checked"
+                 [id]="'menu-item-' + menuIndexOf(mi)"
+                 [attr.tabindex]="menuItemTabIndex(menuIndexOf(mi))"
+                 (focus)="onMenuItemFocus(menuIndexOf(mi))"
+                 class="csc-menu-item csc-menu-radio"
+                 [class.csc-menu-radio-checked]="mi.checked"
+                 (click)="activateMenuItem(mi)"
+                 (keydown.enter)="activateMenuItem(mi)"
+                 (keydown.space)="activateMenuItem(mi); $event.preventDefault()">
+              <span class="csc-menu-radio-indicator" aria-hidden="true" [style.border-color]="mi.iconColor">
+                @if (mi.checked) { <span class="csc-menu-radio-dot" [style.background]="mi.iconColor"></span> }
+              </span>
+              {{ mi.label }}
+            </div>
+          }
+        </div>
+      } @else {
+        @for (mi of group.items; track mi.label) {
+          <div role="menuitem"
+               [id]="'menu-item-' + menuIndexOf(mi)"
+               [attr.tabindex]="menuItemTabIndex(menuIndexOf(mi))"
+               (focus)="onMenuItemFocus(menuIndexOf(mi))"
+               [attr.aria-disabled]="mi.disabled ? 'true' : null"
+               [attr.aria-describedby]="mi.desc ? 'menu-desc-' + mi.idx : null"
+               class="csc-menu-item"
+               [class.csc-menu-item-disabled]="mi.disabled"
+               (click)="activateMenuItem(mi)"
+               (keydown.enter)="activateMenuItem(mi)"
+               (keydown.space)="activateMenuItem(mi); $event.preventDefault()">
+            <span aria-hidden="true" [style.color]="mi.iconColor" style="width:15px;display:flex;justify-content:center">{{ mi.icon }}</span>
+            {{ mi.label }}
+            @if (mi.desc) {
+              <span [id]="'menu-desc-' + mi.idx" class="csc-sr-only">{{ mi.desc }}</span>
+              <span aria-hidden="true" [style.color]="mi.iconColor" style="margin-left:auto;font-weight:700">✓</span>
+            }
+          </div>
+        }
+      }
+    }
+  </div>
+}
+
+<!-- ComboBox option list. Rendered at the root because .csc-data-cell clips
+     its own overflow, which would cut the list off after a few pixels. -->
+@if (comboCell()) {
+  <ul class="csc-combo-popover" role="listbox" [id]="comboListId"
+      [attr.aria-label]="colLabel(comboField()!) + ' options'"
+      [style.left.px]="comboX()" [style.top.px]="comboY()" [style.width.px]="comboW()">
+    @for (o of comboMatches(); track o.id) {
+      <li role="option" [id]="o.id" class="csc-combo-option"
+          [class.csc-combo-option-active]="o.active"
+          [attr.aria-selected]="o.active"
+          (mousedown)="$event.preventDefault()"
+          (click)="pickComboOption(o.value)">{{ o.value }}</li>
+    }
+    @if (comboMatches().length === 0) {
+      <li class="csc-combo-empty" role="presentation">No matching options</li>
+    }
+  </ul>
+}
+
+<!-- Filter popover -->
+@if (filterField()) {
+  <div class="csc-overlay" (click)="closeOverlays()"></div>
+  <div class="csc-filter-popover" role="dialog"
+       [attr.aria-labelledby]="filterTitleId()"
+       [style.left.px]="filterX()" [style.top.px]="filterY()"
+       (click)="$event.stopPropagation()"
+       (keydown)="onFilterPopupKeyDown($event)">
+    <div class="csc-filter-search-wrap">
+      <span [id]="filterTitleId()" class="csc-sr-only">Filter {{ colLabel(filterField()!) }} column</span>
+      <div class="csc-filter-search-box">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" [attr.stroke]="accent()" stroke-width="1.5" aria-hidden="true">
+          <circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/>
+        </svg>
+        <input id="filter-search-input" placeholder="Search..."
+               [attr.aria-label]="'Search ' + colLabel(filterField()!) + ' filter values'"
+               [value]="filterSearch()"
+               (input)="onFilterSearchChange($any($event.target).value)"/>
+      </div>
+      <!-- Live announced result count -->
+      <div class="csc-filter-count" [style.color]="filterCountColor()" aria-live="polite" aria-atomic="true">
+        {{ filterCountText() }}
+      </div>
+    </div>
+    <!-- A checkbox group, not a listbox. These items look like checkboxes and
+         behave like checkboxes, and the Select All row needs a "mixed" state
+         that aria-selected simply does not have. role=listbox also could not
+         legally contain a checkbox - a listbox may only own options - so the
+         container role changes with the items. Two side effects, both good:
+         the count no longer includes Select All as though it were one of the
+         column's values, and aria-multiselectable is gone because a checkbox
+         group needs no such hint.
+
+         Arrow-key roving is kept (onFilterPopupKeyDown): these lists run to
+         dozens of values and turning each into its own tab stop would bury
+         the Clear and Apply buttons behind all of them. -->
+    <div class="csc-filter-list" role="group" [attr.aria-label]="colLabel(filterField()!) + ' filter values'">
+      @if (filterEmpty()) {
+        <div class="csc-filter-empty">No matches found</div>
+      } @else {
+        <div role="checkbox" [attr.aria-checked]="filterAllAriaChecked()"
+             [attr.aria-controls]="filterValueIds()"
+             [attr.tabindex]="filterOptTabIndex(0)"
+             (focus)="onFilterOptFocus(0)"
+             id="filter-opt-0"
+             class="csc-filter-item csc-filter-selectall"
+             (click)="toggleFilterSelectAll()"
+             (keydown.enter)="toggleFilterSelectAll()"
+             (keydown.space)="toggleFilterSelectAll(); $event.preventDefault()">
+          <div class="csc-checkbox sm" aria-hidden="true"
+               [style.border-color]="(allFilterChecked() || someFilterChecked()) ? accent() : '#9aa6ad'"
+               [style.background]="allFilterChecked() ? accent() : '#fff'">
+            @if (allFilterChecked()) { <span class="csc-chk-mark">✓</span> }
+            @else if (someFilterChecked()) { <span class="csc-chk-mark csc-chk-indeterminate" [style.color]="accent()">−</span> }
+          </div>
+          <span style="font-weight:700">Select All</span>
+        </div>
+      }
+      @for (fv of filterValues(); track fv.label; let fi = $index) {
+        <div role="checkbox" [attr.aria-checked]="fv.checked"
+             [attr.tabindex]="filterOptTabIndex(fi + 1)"
+             (focus)="onFilterOptFocus(fi + 1)"
+             [id]="'filter-opt-' + (fi + 1)"
+             class="csc-filter-item"
+             (click)="toggleFilterVal(fv.label)"
+             (keydown.enter)="toggleFilterVal(fv.label)"
+             (keydown.space)="toggleFilterVal(fv.label); $event.preventDefault()">
+          <div class="csc-checkbox sm" aria-hidden="true" [style.border-color]="fv.boxBorder" [style.background]="fv.boxBg">
+            @if (fv.checked) { <span class="csc-chk-mark">✓</span> }
+          </div>
+          <span>{{ fv.label }}</span>
+        </div>
+      }
+    </div>
+    <div class="csc-filter-actions">
+      <button type="button" class="csc-btn-outline" (click)="clearFilter()">Clear</button>
+      <button type="button" class="csc-btn-primary" [style.background]="accent()" (click)="applyFilter()">Apply</button>
+    </div>
+  </div>
+}
+
+<!-- Toast -->
+@if (toast()) {
+  <div class="csc-toast" role="status">
+    <span class="csc-toast-icon" [style.background]="accent()">✓</span>{{ toast() }}
+  </div>
+}
+
+<!-- Choose Columns modal -->
+@if (chooserOpen()) {
+  <div class="csc-modal-overlay" (click)="closeChooser()">
+    <div id="chooser-dialog" role="dialog" aria-modal="true" aria-labelledby="chooser-title"
+         class="csc-modal" [class.csc-modal-wide]="isSimple()" focusTrap
+         (click)="$event.stopPropagation()"
+         (keydown)="trapTabKey($event, 'chooser-dialog')">
+      <div class="csc-modal-header">
+        <span id="chooser-title" role="heading" aria-level="2" class="csc-modal-title">Choose columns</span>
+        <button type="button" class="csc-modal-close" aria-label="Close choose columns dialog" (click)="closeChooser()">✕</button>
+      </div>
+      <div class="csc-modal-search-wrap">
+        <div class="csc-filter-search-box">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" [attr.stroke]="accent()" stroke-width="1.5" aria-hidden="true">
+            <circle cx="7" cy="7" r="5"/><path d="M11 11l3.5 3.5"/>
+          </svg>
+          <input id="chooser-search-input" aria-label="Search columns" placeholder="Search columns..."
+                 [value]="chooserSearch()" (input)="onChooserSearch($any($event.target).value)"/>
+        </div>
+      </div>
+      <ng-template #chooserSelectAll>
+        <div class="csc-chooser-selectall-row" [class.csc-cc-selectall]="isSimple()">
+          <button type="button" class="csc-selectall-btn"
+                  role="checkbox"
+                  [attr.aria-checked]="chooserAllAriaChecked()"
+                  [attr.aria-controls]="chooserItemIds()"
+                  (click)="toggleChooserSelectAll()">
+            @if (!isSimple()) { <span class="csc-selectall-spacer" aria-hidden="true"></span> }
+            <span class="csc-checkbox sm" aria-hidden="true"
+                  [style.border-color]="(chooserAllVisible() || chooserSomeVisible()) ? accent() : '#9aa6ad'"
+                  [style.background]="chooserAllVisible() ? accent() : '#fff'">
+              @if (chooserAllVisible()) { <span class="csc-chk-mark">✓</span> }
+              @else if (chooserSomeVisible()) { <span class="csc-chk-mark csc-chk-indeterminate" [style.color]="accent()">−</span> }
+            </span>
+            <span class="csc-selectall-text">Select all</span>
+          </button>
+          <span class="csc-chooser-count">{{ chooserCountLabel() }}</span>
+        </div>
+      </ng-template>
+      <!-- The simplified chooser's table header is sticky, so Select all is
+           lifted clear of the scroll region instead of sliding under it. -->
+      @if (isSimple()) {
+        <div class="csc-chooser-selectall-fixed">
+          <ng-container *ngTemplateOutlet="chooserSelectAll"></ng-container>
+        </div>
+      }
+      <div class="csc-chooser-scroll" [class.csc-chooser-scroll-table]="isSimple()"
+           role="group" aria-label="Column list, scrollable" tabindex="0">
+        @if (!isSimple()) {
+          <ng-container *ngTemplateOutlet="chooserSelectAll"></ng-container>
+        }
+        @if (chooserItems().length === 0) {
+          <p class="csc-chooser-empty">No columns match your search.</p>
+        } @else if (isSimple()) {
+          <!-- Simplified Editable: the header carries no layout controls, so
+               order, visibility and pinning are all managed here. -->
+          <table class="csc-chooser-table">
+            <caption class="csc-sr-only">
+              Column settings. Reorder with the drag handle, or by typing a position in the Order field.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" class="csc-cc-drag"><span class="csc-sr-only">Reorder</span></th>
+                <th scope="col" class="csc-cc-show">Show</th>
+                <th scope="col" class="csc-cc-name">Column name</th>
+                <th scope="col" class="csc-cc-order">Order</th>
+                <th scope="col" class="csc-cc-pin">Pin</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (ci of chooserItems(); track ci.field) {
+                <tr class="csc-chooser-row"
+                    [attr.draggable]="ci.draggable"
+                    [style.box-shadow]="ci.dropShadow" [style.opacity]="ci.dragOpacity"
+                    (dragstart)="onCDragStart(ci.field)"
+                    (dragover)="onCDragOver(ci.field, $event)"
+                    (drop)="onCDrop(ci.field, $event)"
+                    (dragend)="onCDragEnd()">
+                  <td class="csc-cc-drag">
+                    <!-- A button, not a bare handle: dragging must never be the
+                         only way to reorder (WCAG 2.5.7). -->
+                    <button type="button" class="csc-drag-handle" [id]="ci.dragId"
+                            [style.color]="accent()"
+                            [attr.aria-label]="ci.dragLabel"
+                            [disabled]="!ci.draggable"
+                            (keydown)="onChooserDragKey($event, ci.field)">
+                      <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
+                        <circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/>
+                        <circle cx="2" cy="6.5" r="1.3"/><circle cx="7" cy="6.5" r="1.3"/>
+                        <circle cx="2" cy="11" r="1.3"/><circle cx="7" cy="11" r="1.3"/>
+                      </svg>
+                    </button>
+                  </td>
+                  <td class="csc-cc-show">
+                    <div role="checkbox" [id]="'chooser-chk-' + ci.field"
+                         [attr.aria-checked]="ci.visible" [attr.aria-labelledby]="ci.labelId" tabindex="0"
+                         class="csc-checkbox sm" [style.border-color]="ci.boxBorder" [style.background]="ci.boxBg"
+                         (click)="toggleColumn(ci.field)"
+                         (keydown.enter)="toggleColumn(ci.field)"
+                         (keydown.space)="toggleColumn(ci.field); $event.preventDefault()">
+                      @if (ci.visible) { <span class="csc-chk-mark">✓</span> }
+                    </div>
+                  </td>
+                  <td class="csc-cc-name">
+                    <span class="csc-chooser-label" [id]="ci.labelId" (click)="toggleColumn(ci.field)">{{ ci.label }}</span>
+                  </td>
+                  <td class="csc-cc-order">
+                    <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
+                           role="spinbutton"
+                           [attr.aria-labelledby]="ci.labelId"
+                           [attr.aria-valuenow]="ci.pos" aria-valuemin="1" [attr.aria-valuemax]="ci.total"
+                           [attr.aria-valuetext]="ci.posLabel"
+                           [value]="ci.posVal"
+                           (keydown)="onPosKeyDown($event, ci.field)"
+                           (change)="setColumnPosition(ci.field, $any($event.target).value)"/>
+                  </td>
+                  <td class="csc-cc-pin">
+                    <select class="csc-pin-select" [id]="ci.pinId"
+                            [attr.aria-labelledby]="ci.labelId + ' ' + ci.pinId"
+                            [value]="ci.pin"
+                            (change)="setColumnPin(ci.field, $any($event.target).value)">
+                      <option value="">None</option>
+                      <option value="left">Left</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        } @else {
+        <ul class="csc-chooser-list">
+        @for (ci of chooserItems(); track ci.field) {
+          <li class="csc-chooser-item"
+               [attr.draggable]="ci.draggable"
+               [style.box-shadow]="ci.dropShadow" [style.opacity]="ci.dragOpacity"
+               (dragstart)="onCDragStart(ci.field)"
+               (dragover)="onCDragOver(ci.field, $event)"
+               (drop)="onCDrop(ci.field, $event)"
+               (dragend)="onCDragEnd()">
+            <span class="csc-drag-handle" [style.color]="accent()" aria-hidden="true">
+              <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor">
+                <circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/>
+                <circle cx="2" cy="6.5" r="1.3"/><circle cx="7" cy="6.5" r="1.3"/>
+                <circle cx="2" cy="11" r="1.3"/><circle cx="7" cy="11" r="1.3"/>
+              </svg>
+            </span>
+            <div role="checkbox" [id]="'chooser-chk-' + ci.field"
+                 [attr.aria-checked]="ci.visible" [attr.aria-label]="ci.label" tabindex="0"
+                 class="csc-checkbox sm" [style.border-color]="ci.boxBorder" [style.background]="ci.boxBg"
+                 (click)="toggleColumn(ci.field)"
+                 (keydown.enter)="toggleColumn(ci.field)"
+                 (keydown.space)="toggleColumn(ci.field); $event.preventDefault()">
+              @if (ci.visible) { <span class="csc-chk-mark">✓</span> }
+            </div>
+            <span class="csc-chooser-label" [id]="ci.labelId" (click)="toggleColumn(ci.field)">{{ ci.label }}</span>
+            <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
+                   role="spinbutton"
+                   [attr.aria-labelledby]="ci.labelId"
+                   [attr.aria-valuenow]="ci.pos" aria-valuemin="1" [attr.aria-valuemax]="ci.total"
+                   [attr.aria-valuetext]="ci.posLabel"
+                   [value]="ci.posVal"
+                   (keydown)="onPosKeyDown($event, ci.field)"
+                   (change)="setColumnPosition(ci.field, $any($event.target).value)"/>
+          </li>
+        }
+        </ul>
+        }
+      </div>
+      <div class="csc-modal-footer">
+        @if (isSimple()) {
+          <button type="button" class="csc-btn-outline" (click)="autosizeAllColumns()">Autosize all columns</button>
+        }
+        <button type="button" class="csc-btn-outline" (click)="resetColumns()">Reset</button>
+        <div style="flex:1"></div>
+        <!-- "Close", not "Done": column changes apply live as they are toggled,
+             so this button commits nothing - it only dismisses the dialog, the
+             same as the header ✕ and Escape. Naming it "Done" implied a save
+             step that does not exist, and next to "Reset" it read as the
+             confirm half of a confirm/cancel pair. The visible text carries
+             the meaning rather than an aria-label, so the accessible name and
+             the label a speech-recognition user says stay identical (2.5.3). -->
+        <button type="button" class="csc-btn-primary" [style.background]="accent()" (click)="closeChooser()">Close</button>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- Add Record modal -->
+@if (addOpen()) {
+  <div class="csc-modal-overlay" (click)="closeAddModal()">
+    <div id="add-dialog" role="dialog" aria-modal="true" aria-labelledby="add-title"
+         class="csc-modal" focusTrap
+         (click)="$event.stopPropagation()"
+         (keydown)="trapTabKey($event, 'add-dialog')">
+      <div class="csc-modal-header">
+        <span id="add-title" role="heading" aria-level="2" class="csc-modal-title">Add record</span>
+        <button type="button" class="csc-modal-close" aria-label="Close add record dialog" (click)="closeAddModal()">✕</button>
+      </div>
+      <div class="csc-modal-body-scroll">
+        @for (af of addFields(); track af.field) {
+          <div class="csc-form-field">
+            <label [for]="af.fieldId" class="csc-form-label">{{ af.label }}</label>
+            <input [id]="af.fieldId" type="text" class="csc-form-input"
+                   [value]="af.value"
+                   [attr.aria-invalid]="af.invalid ? 'true' : null"
+                   [attr.aria-describedby]="af.describedBy || null"
+                   [style.border-color]="af.borderColor"
+                   (input)="addDraftField(af.field, $any($event.target).value)"
+                   (keydown)="onAddFieldKeyDown($event)"/>
+            @if (af.invalid) {
+              <p [id]="af.errorId" class="csc-form-error" role="alert">{{ af.errorText }}</p>
+            }
+          </div>
+        }
+      </div>
+      <div class="csc-modal-footer">
+        <button type="button" class="csc-btn-outline" (click)="closeAddModal()">Cancel</button>
+        <div style="flex:1"></div>
+        <button type="button" class="csc-btn-primary" [style.background]="accent()" (click)="saveAdd()">Save</button>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- Delete confirm modal -->
+@if (deleteId() != null || bulkDeleteOpen()) {
+  <div class="csc-modal-overlay" (click)="closeDeleteConfirm()">
+    <div id="delete-dialog" role="dialog" aria-modal="true"
+         aria-labelledby="delete-title" aria-describedby="delete-desc"
+         class="csc-modal csc-modal-narrow" focusTrap
+         (click)="$event.stopPropagation()"
+         (keydown)="trapTabKey($event, 'delete-dialog')">
+      <div class="csc-modal-body-pad">
+        <span id="delete-title" role="heading" aria-level="2" class="csc-modal-title">
+          {{ bulkDeleteOpen() ? 'Delete selected records?' : 'Delete record?' }}
+        </span>
+        <p id="delete-desc" class="csc-delete-desc">
+          @if (bulkDeleteOpen()) {
+            This will permanently remove {{ selCount() }} selected record{{ selCount() === 1 ? '' : 's' }}. This action cannot be undone.
+          } @else {
+            This will permanently remove {{ deleteRow()?.entity }}. This action cannot be undone.
+          }
+        </p>
+      </div>
+      <div class="csc-modal-footer">
+        <button type="button" id="delete-cancel-btn" class="csc-btn-outline" (click)="closeDeleteConfirm()">Cancel</button>
+        <button type="button" class="csc-btn-danger"
+                (click)="bulkDeleteOpen() ? confirmBulkDelete() : confirmDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+}

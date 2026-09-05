@@ -1,0 +1,672 @@
+@keyframes toastIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+@keyframes popIn   { from { opacity:0; transform:translateY(-4px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+
+.csc-sr-only { position:absolute; width:1px; min-height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+/* ── Shell ─────────────────────────────────────────────────────────── */
+.csc-shell { display:flex; min-height:100vh; background:#eef0f1; color:#222; font-family:'Lato',-apple-system,Segoe UI,sans-serif; }
+
+/* ── Sidebar ───────────────────────────────────────────────────────── */
+.csc-sidebar  { width:230px; flex:none; background:#fff; border-right:1px solid #D1D3D4; padding-top:12px; }
+.csc-navlink  { padding:13px 22px; font-size:0.875rem; cursor:pointer; border-left:4px solid transparent; transition:background .12s; }
+/* Fix: hover should not make text invisible — use dark text */
+.csc-navlink:hover { background:#f0f8fa !important; color:#013a4f !important; }
+
+/* ── Main ──────────────────────────────────────────────────────────── */
+.csc-main { flex:1; min-width:0; overflow:auto; padding:0 0 60px 0; }
+
+/* ── Page header ───────────────────────────────────────────────────── */
+.csc-page-header   { padding:22px 32px 0 32px; }
+.csc-page-title    { font-size:1.625rem; font-weight:700; color:#013a4f; }
+.csc-page-subtitle { font-size:0.875rem; color:#5b6b76; margin-top:6px; max-width:760px; }
+.csc-page-tabs     { display:flex; gap:26px; margin-top:18px; border-bottom:1px solid #D1D3D4; }
+.csc-page-tab      { font-size:0.875rem; padding-bottom:10px; color:#013a4f; font-weight:700; border-bottom:3px solid transparent; }
+
+/* ── Legend ────────────────────────────────────────────────────────── */
+.csc-legend-wrap   { margin:18px 32px 0 32px; }
+.csc-legend-toggle { cursor:pointer; display:inline-flex; align-items:center; gap:8px; font-size:0.8125rem; color:#013a4f; font-weight:700; }
+.csc-legend-arrow  { display:inline-block; transition:transform .15s; }
+.csc-legend-panel  { margin-top:10px; display:flex; flex-wrap:wrap; gap:18px; padding:14px 18px; background:#fff; border:1px solid #D1D3D4; border-radius:3px; }
+.csc-legend-item   { display:flex; align-items:center; gap:8px; }
+.csc-legend-keys   { display:inline-flex; gap:4px; }
+.csc-kbd           { font-family:'SFMono-Regular',Menlo,monospace; font-size:0.6875rem; background:#eef1f2; border:1px solid #cfd5d8; border-bottom-width:2px; border-radius:3px; padding:2px 7px; color:#3a4a52; }
+.csc-legend-desc   { font-size:0.7812rem; color:#5b6b76; }
+
+/* ── Card ──────────────────────────────────────────────────────────── */
+.csc-card        { margin:22px 32px 0 32px; border:1px solid #D1D3D4; border-radius:3px; background:#fff; }
+.csc-card-header { display:flex; align-items:center; padding:14px 18px; border-bottom:1px solid #D1D3D4; background:#fafbfc; }
+.csc-card-title  { font-size:1.125rem; font-weight:700; color:#013a4f; flex:1; }
+.csc-copy-link   { display:flex; align-items:center; gap:6px; font-size:0.75rem; cursor:pointer; }
+
+/* ── Toolbar ───────────────────────────────────────────────────────── */
+.csc-toolbar      { display:flex; align-items:center; gap:2px; padding:8px 14px; border-bottom:1px solid #e6e8e9; flex-wrap:wrap; }
+.csc-toolbar-left { display:flex; align-items:center; gap:2px; flex-wrap:wrap; }
+.csc-toolbar-right{ display:flex; align-items:center; gap:8px; font-size:0.75rem; margin-left:auto; }
+.csc-toolbar-btn  { display:flex; align-items:center; gap:6px; padding:6px 12px; cursor:pointer; color:#013a4f; font-size:0.7812rem; font-weight:700; text-transform:uppercase; letter-spacing:.3px; border-radius:2px; }
+.csc-toolbar-btn:hover { background:#f0f8fa; }
+.csc-toolbar-icon { font-size:0.8125rem; }
+
+
+/* ── Selection bar ─────────────────────────────────────────────────── */
+.csc-sel-bar   { display:flex; align-items:center; gap:12px; padding:8px 16px; background:#EBF6FD; border-bottom:1px solid #cfe2ee; }
+.csc-sel-badge { display:inline-flex; align-items:center; color:#fff; font-size:0.75rem; font-weight:700; padding:4px 10px; border-radius:12px; }
+.csc-sel-note  { font-size:0.75rem; color:#5b6b76; }
+.csc-sel-clear { font-size:0.75rem; color:#075A92; text-decoration:underline; cursor:pointer; }
+
+/* ── Grid ──────────────────────────────────────────────────────────── */
+.csc-grid-scroll { overflow-x:auto; }
+/* width:max-content makes the inner wrapper as wide as the widest row's full
+   track sum, so every row's element box (and therefore its zebra background)
+   spans the ENTIRE horizontally-scrollable width — not just the visible part.
+   min-width:100% keeps it filling the card when columns are narrower. */
+.csc-grid-inner  { width:max-content; min-width:100%; }
+
+.csc-header-row {
+  display:grid; min-height:48px; background:#F5F5F5; border-bottom:1px solid #D1D3D4;
+  position:sticky; top:0; z-index:2;
+}
+.csc-header-lead   { display:flex; align-items:center; gap:2px; padding-left:12px; border-right:1px solid #D1D3D4; }
+.csc-header-action { display:flex; align-items:center; justify-content:center; border-right:1px solid #D1D3D4; }
+.csc-header-cell {
+  position:relative;
+  border-right:1px solid #D1D3D4; font-size:0.75rem; font-weight:700; color:#013a4f; min-width:0;
+  /* Full header area click = sort */
+  cursor:pointer;
+  user-select:none;
+}
+/* Icon row + label — clips here so an extra icon (e.g. the pin indicator) never
+   visually spills into the next column. The resize handle lives OUTSIDE this
+   wrapper (direct child of .csc-header-cell) so its -9px grab overhang is
+   unaffected by this overflow:hidden. */
+.csc-header-content {
+  display:flex; align-items:center; gap:1px; min-width:0;
+  padding:0 6px 0 10px; height:100%; overflow:hidden;
+}
+/* Resize mode visual indicator */
+.csc-header-resizing { outline:2px solid #008996; outline-offset:-2px; }
+
+/* ── Pinned (frozen) columns ────────────────────────────────────────────
+   A pinned cell stops scrolling horizontally and parks against the edge of
+   .csc-grid-scroll. The left/right offset is set inline per column (summed
+   width of the frozen columns ahead of it) - see pinOffsets() in the
+   component; it cannot live here because it depends on live column widths.
+
+   background:inherit is what stops the scrolling cells from showing THROUGH
+   the frozen ones: cells are transparent by default and the colour lives on
+   the row (zebra / selected / hover, set inline or via :hover), so inheriting
+   picks up whichever of those is currently active - a hardcoded colour here
+   would break striping and lose the hover and selected states. */
+/* The extra .csc-grid-inner in these selectors is deliberate: .csc-cell-dirty
+   and .csc-cell-editable set position:relative at two-class specificity, and a
+   plain .csc-pinned-left would lose to them - a dirty or editable cell in a
+   frozen column would silently stop being frozen. */
+.csc-grid-inner .csc-gridcell.csc-pinned-left,
+.csc-grid-inner .csc-gridcell.csc-pinned-right { position:sticky; background:inherit; z-index:1; }
+/* Header cells sit above data cells so a frozen column's header is never
+   overlapped while scrolling both ways at once. The header row is already
+   sticky top, so this only orders siblings within it. */
+.csc-header-row .csc-gridcell.csc-pinned-left,
+.csc-header-row .csc-gridcell.csc-pinned-right { z-index:3; background:#F5F5F5; }
+
+/* Boundary between the frozen block and the scrolling content, so it is clear
+   why those columns are standing still. box-shadow works on the data/action
+   cells - an element's own shadow is not clipped by its own overflow:hidden -
+   but the data column HEADER binds box-shadow inline for the drag drop-target
+   indicator, which would beat any stylesheet rule, so that one case is drawn
+   with a pseudo-element instead (.csc-header-cell has no overflow of its own,
+   only its inner .csc-header-content does, so the ::before is not clipped). */
+.csc-grid-inner .csc-gridcell.csc-pin-edge-left:not(.csc-header-cell)  { box-shadow: 6px 0 6px -4px rgba(1,58,79,0.28); }
+.csc-grid-inner .csc-gridcell.csc-pin-edge-right:not(.csc-header-cell) { box-shadow: -6px 0 6px -4px rgba(1,58,79,0.28); }
+.csc-header-cell.csc-pin-edge-left::before,
+.csc-header-cell.csc-pin-edge-right::before {
+  content:""; position:absolute; top:0; min-height:100%; width:6px; pointer-events:none;
+}
+.csc-header-cell.csc-pin-edge-left::before  { right:-6px; background:linear-gradient(to right, rgba(1,58,79,0.22), rgba(1,58,79,0)); }
+.csc-header-cell.csc-pin-edge-right::before { left:-6px;  background:linear-gradient(to left,  rgba(1,58,79,0.22), rgba(1,58,79,0)); }
+
+.csc-col-label {
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-right:auto; pointer-events:none;
+  /* Guarantees the label never fully collapses to 0px/invisible when the column
+     is narrow. It can still shrink (so it doesn't crowd out the sort/filter/menu
+     icons), but always keeps at least a sliver of text + ellipsis visible. */
+  min-width: 48px;
+}
+
+/* Rows */
+.csc-row-wrap { border-bottom:1px solid #D1D3D4; }
+/* Stands in for the rows the virtual window is not rendering. */
+.csc-vspacer { width:100%; }
+.csc-row      { display:grid; }
+.csc-row:hover { background:#EBF6FD !important; }
+.csc-row:focus-within { box-shadow:inset 3px 0 0 0 #008996; }
+
+/* Cells */
+.csc-gridcell {
+  outline:none;
+  /* Matches .csc-header-cell's border-right - data rows previously had NO
+     visual divider between columns at all (only the header row did), so a
+     narrow column's text could visually run into the next column with no
+     boundary line to separate them. */
+  border-right:1px solid #D1D3D4;
+}
+.csc-gridcell:focus-visible { outline:2px solid #008996; outline-offset:-2px; border-radius:2px; }
+.csc-lead-cell    { display:flex; align-items:center; gap:2px; padding-left:12px; }
+.csc-action-cell  { display:flex; align-items:center; justify-content:center; }
+.csc-data-cell    { display:flex; align-items:center; gap:6px; padding:0 10px; min-width:0; font-size:0.75rem;
+  /* Without this, cell content (esp. the doc icon+link, which is nowrap) paints
+     PAST the cell's track into the neighbouring column when the column is narrow. */
+  overflow:hidden; white-space:nowrap;
+}
+.csc-cell-text    { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.csc-doc-link     { color:#075A92; text-decoration:underline; font-size:0.75rem; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+
+/* Edit input */
+.csc-edit-input { width:100%; font-family:inherit; font-size:0.75rem; padding:4px 6px; border-radius:2px; border:1px solid; }
+.csc-edit-input:focus { outline:2px solid #008996; outline-offset:-1px; }
+.csc-combo { display:flex; align-items:center; gap:2px; width:100%; min-width:0; }
+.csc-combo-input { flex:1; min-width:0; }
+.csc-combo-toggle { flex:none; border:none; background:transparent; padding:0 2px; cursor:pointer; display:inline-flex; align-items:center; }
+.csc-combo-popover {
+  position:fixed; z-index:42; margin:0; padding:4px 0; list-style:none;
+  background:#fff; border:1px solid #D1D3D4; border-radius:3px;
+  box-shadow:0 6px 22px rgba(0,0,0,.16); max-height:220px; overflow-y:auto;
+  animation:popIn .12s ease;
+}
+.csc-combo-option { padding:6px 12px; font-size:0.8125rem; color:#222; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.csc-combo-option:hover { background:#f5f7f8; }
+.csc-combo-option-active { background:#D5E5EB; font-weight:600; }
+.csc-combo-empty { padding:10px 12px; font-size:0.7812rem; color:#9aa6ad; font-style:italic; }
+
+/* Action buttons in cells */
+.csc-action-btn {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:32px; min-height:32px; border:none; background:transparent;
+  cursor:pointer; border-radius:4px; font-family:inherit;
+}
+.csc-action-btn:hover { background:rgba(0,137,150,0.10); }
+.csc-action-btn:focus-visible { outline:2px solid #008996; outline-offset:1px; }
+.csc-edit-btn   { color:#008996; }
+.csc-delete-btn { color:#b23b3b; }
+.csc-delete-btn:hover { background:rgba(178,59,59,0.08); }
+.csc-save-btn   { color:#fff; width:20px; min-height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; }
+.csc-cancel-btn { color:#5b6b76; border:1px solid #c2c8cc; width:20px; min-height:20px; border-radius:3px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; }
+
+/* Expand panel */
+.csc-expand-row   { display:block; }
+.csc-expand-panel { background:#f6f9fb; border-top:1px solid #cfe2ee; padding:18px 24px 18px 95px; }
+.csc-expand-title { font-size:0.8125rem; font-weight:700; color:#013a4f; margin-bottom:12px; }
+.csc-expand-grid  { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px 28px; max-width:880px; }
+.csc-expand-field { font-size:0.8125rem; color:#222; }
+.csc-expand-label { font-size:0.6875rem; text-transform:uppercase; letter-spacing:.4px; color:#7d8a92; margin-bottom:3px; }
+.csc-status-dot   { width:8px; min-height:8px; border-radius:50%; display:inline-block; }
+
+/* Lazily loaded child records inside the expand panel */
+.csc-child-block  { margin-top:18px; }
+.csc-child-status { margin:6px 0 0; font-size:0.8125rem; color:#5b6b76; display:flex; align-items:center; gap:10px; }
+.csc-child-error  { color:#a3232c; }
+.csc-child-table  { margin-top:8px; border-collapse:collapse; font-size:0.8125rem; max-width:880px; width:100%; }
+.csc-child-table th,
+.csc-child-table td { text-align:left; padding:6px 12px; border-bottom:1px solid #dde6ec; }
+.csc-child-table th { font-size:0.6875rem; text-transform:uppercase; letter-spacing:.4px; color:#5b6b76; }
+
+/* ── Shared UI atoms ───────────────────────────────────────────────── */
+.csc-ico     { width:24px; min-height:24px; display:flex; align-items:center; justify-content:center; flex:none; border-radius:4px; font-size:0.75rem; }
+/* .csc-ico-btn sits on BOTH <span>/<div> icons and real <button> elements
+   (expand chevron, expand-all). Native buttons carry the browser's default
+   outset border + grey background, which is why only the chevrons looked
+   boxed-in while the pencil/trash icons (.csc-action-btn, already reset)
+   looked clean. Reset here so every icon control renders icon-only.
+   Focus is still fully visible via the :focus-visible outline below. */
+.csc-ico-btn { cursor:pointer; border:none; background:transparent; padding:0; font-family:inherit; }
+.csc-ico-btn:hover { background:rgba(0,137,150,0.10); }
+.csc-action  { cursor:pointer; }
+.csc-action:hover { opacity:.75; }
+.csc-drag-handle { cursor:grab; }
+.csc-sort-btn  { pointer-events:all !important; }
+.csc-filter-btn{ pointer-events:all !important; }
+.csc-menu-btn  { font-weight:900; letter-spacing:-1px; pointer-events:all !important; }
+
+.csc-checkbox { width:18px; min-height:18px; border-radius:3px; display:flex; align-items:center; justify-content:center; border:2px solid; box-sizing:border-box; cursor:pointer; }
+.csc-checkbox.sm { width:16px; min-height:16px; }
+.csc-chk-mark          { color:#fff; font-size:0.75rem; line-height:1; }
+.csc-chk-indeterminate { font-size:0.8125rem; font-weight:900; }
+
+/* Resize handle — default teal */
+.csc-resize      { position:absolute; right:-9px; top:0; height:100%; width:18px; cursor:col-resize; z-index:3; display:flex; align-items:center; justify-content:center; pointer-events:all !important; }
+.csc-resize-grip { width:0; min-height:20px; border-left:2px solid #008996; border-right:2px solid #008996; box-sizing:content-box; padding:0 1px; border-radius:1px; opacity:.45; transition:opacity .12s, height .12s; }
+.csc-resize:hover .csc-resize-grip { opacity:1; min-height:30px; }
+
+/* ── Buttons ───────────────────────────────────────────────────────── */
+.csc-btn-outline { cursor:pointer; font-size:0.8125rem; color:#5b6b76; border:1px solid #D1D3D4; border-radius:3px; padding:8px 16px; background:transparent; font-family:inherit; }
+.csc-btn-primary { cursor:pointer; font-size:0.8125rem; color:#fff; border:none; border-radius:3px; padding:8px 20px; font-weight:700; font-family:inherit; }
+.csc-btn-danger  { cursor:pointer; font-size:0.8125rem; color:#fff; background:#b23b3b; border:none; border-radius:3px; padding:8px 20px; font-weight:700; font-family:inherit; }
+button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px solid #008996; outline-offset:1px; border-radius:2px; }
+.csc-link-btn { cursor:pointer; color:#075A92; text-decoration:underline; font-size:0.75rem; background:none; border:none; font-family:inherit; padding:0; }
+.csc-updown   { cursor:pointer; width:24px; min-height:24px; display:flex; align-items:center; justify-content:center; font-size:0.8125rem; border:none; background:transparent; border-radius:3px; font-family:inherit; }
+.csc-updown:hover { background:rgba(0,137,150,0.10); }
+
+/* ── Pagination ────────────────────────────────────────────────────── */
+.csc-pagination      { display:flex; align-items:center; gap:18px; padding:12px 18px; border-top:1px solid #D1D3D4; flex-wrap:wrap; font-size:0.8125rem; color:#5b6b76; }
+.csc-page-size-wrap  { display:flex; align-items:center; gap:8px; }
+.csc-page-size-btn   { cursor:pointer; display:flex; align-items:center; gap:10px; padding:5px 10px; border:1px solid #D1D3D4; border-radius:2px; }
+.csc-page-btns       { display:flex; align-items:center; gap:4px; }
+/* Prev/Next — 2x size */
+/* One rule only. These were <span role="button"> originally at 48x48/32px;
+   turning them into real <button>s needed a chrome reset, and the reset I added
+   also re-declared padding, which silently shrank them. Everything lives here
+   now so a later rule cannot quietly override the size again. */
+.csc-page-prev-next {
+  cursor:pointer; width:48px; min-height:48px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:2.0rem; line-height:1; color:#008996; border-radius:4px;
+  border:none; background:transparent; font-family:inherit; padding:0;
+}
+.csc-page-prev-next:disabled { color:#9aa6ad; cursor:not-allowed; opacity:1; }
+.csc-page-prev-next:hover:not(:disabled) { background:#f0f8fa; }
+.csc-page-num  { cursor:pointer; min-width:28px; min-height:28px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; font-size:0.8125rem; }
+.csc-page-gap  { padding:0 6px; color:#9aa6ad; }
+.csc-goto      { display:flex; align-items:center; gap:8px; }
+.csc-goto-input{ width:46px; font-family:inherit; font-size:0.8125rem; padding:5px 6px; border:1px solid #D1D3D4; border-radius:2px; text-align:center; }
+
+/* ── Popovers ──────────────────────────────────────────────────────── */
+.csc-overlay { position:fixed; inset:0; z-index:40; }
+.csc-menu-popover {
+  position:fixed; z-index:41; background:#fff; border:1px solid #D1D3D4; border-radius:3px;
+  box-shadow:0 6px 22px rgba(0,0,0,.16); padding:6px 0; min-width:220px; animation:popIn .12s ease;
+}
+.csc-menu-divider     { min-height:1px; background:#e6e8e9; margin:4px 0; }
+.csc-menu-group-label { font-size:0.6875rem; text-transform:uppercase; letter-spacing:.4px; color:#7d8a92; padding:4px 16px 2px 16px; }
+.csc-menu-item { display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:0.8125rem; color:#222; cursor:pointer; }
+.csc-menu-item:hover { background:#EBF6FD; }
+/* The menu is one tab stop with roving focus, so the focused item needs a
+   visible indicator of its own - previously every item was tabbable and none
+   of them showed focus. */
+.csc-menu-item:focus-visible { outline:2px solid #008996; outline-offset:-2px; background:#EBF6FD; }
+/* Disabled items stay in the DOM (aria-disabled) rather than being removed, so
+   the menu does not change length as a column reaches an end position. */
+.csc-menu-item-disabled { color:#9aa6ad; cursor:default; }
+.csc-menu-item-disabled:hover { background:transparent; }
+/* Radio group items */
+.csc-menu-radio { gap:10px; }
+.csc-menu-radio-indicator { width:16px; min-height:16px; border-radius:50%; border:2px solid; display:flex; align-items:center; justify-content:center; flex:none; }
+.csc-menu-radio-dot       { width:8px; min-height:8px; border-radius:50%; }
+.csc-menu-radio-checked   { font-weight:600; }
+
+.csc-filter-popover {
+  position:fixed; z-index:41; background:#fff; border:1px solid #D1D3D4; border-radius:3px;
+  box-shadow:0 6px 22px rgba(0,0,0,.16); width:260px; animation:popIn .12s ease;
+}
+.csc-filter-search-wrap { padding:12px 12px 8px 12px; }
+.csc-filter-search-box  { display:flex; align-items:center; gap:8px; border:1px solid #D1D3D4; border-radius:3px; padding:6px 9px; }
+.csc-filter-search-box input { border:none; font-family:inherit; font-size:0.8125rem; flex:1; width:100%; outline:none; }
+.csc-filter-count  { margin-top:7px; font-size:0.75rem; transition:color .12s; }
+.csc-filter-list   { max-height:220px; overflow-y:auto; border-top:1px solid #eee; padding:4px 0; }
+.csc-filter-empty  { padding:18px 14px; text-align:center; font-size:0.7812rem; color:#9aa6ad; font-style:italic; }
+.csc-filter-item   { display:flex; align-items:center; gap:10px; padding:7px 14px; cursor:pointer; font-size:0.8125rem; color:#222; }
+.csc-filter-item:hover { background:#f5f7f8; }
+.csc-filter-item:focus-visible { outline:2px solid #008996; outline-offset:-2px; background:#f5f7f8; }
+.csc-filter-actions{ display:flex; gap:8px; padding:10px 12px; border-top:1px solid #eee; }
+.csc-filter-actions button { flex:1; }
+
+/* ── Toast ─────────────────────────────────────────────────────────── */
+.csc-toast { position:fixed; left:48px; bottom:32px; z-index:60; background:#013a4f; color:#fff; padding:12px 18px; border-radius:4px; box-shadow:0 8px 26px rgba(0,0,0,.28); display:flex; align-items:center; gap:11px; font-size:0.8438rem; animation:toastIn .22s ease; }
+.csc-toast-icon { width:22px; min-height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8125rem; flex:none; }
+
+/* ── Modals ────────────────────────────────────────────────────────── */
+.csc-modal-overlay  { position:fixed; inset:0; z-index:70; background:rgba(1,39,55,0.42); display:flex; align-items:center; justify-content:center; animation:popIn .12s ease; }
+.csc-modal          { width:420px; max-width:92vw; background:#fff; border-radius:5px; box-shadow:0 18px 50px rgba(0,0,0,.3); overflow:hidden; }
+.csc-modal-narrow   { width:400px; }
+/* Simplified Editable's chooser is a 5-column table; 420px clips it. */
+.csc-modal-wide     { width:560px; }
+.csc-modal-header   { display:flex; align-items:center; padding:16px 20px; border-bottom:1px solid #D1D3D4; }
+.csc-modal-title    { font-size:1.0625rem; font-weight:700; color:#013a4f; flex:1; display:block; }
+.csc-modal-close    { cursor:pointer; color:#5b6b76; font-size:1.125rem; line-height:1; border:none; background:none; font-family:inherit; width:32px; min-height:32px; display:flex; align-items:center; justify-content:center; border-radius:4px; }
+.csc-modal-close:hover { background:#f0f8fa; }
+.csc-modal-footer   { display:flex; gap:10px; padding:14px 20px; border-top:1px solid #D1D3D4; }
+.csc-modal-body-scroll { padding:16px 20px; max-height:60vh; overflow-y:auto; display:grid; gap:12px; }
+.csc-modal-body-pad    { padding:20px 20px 0 20px; }
+.csc-modal-search-wrap { padding:14px 20px 4px 20px; }
+.csc-chooser-links  { display:flex; align-items:center; gap:14px; margin-top:10px; font-size:0.75rem; }
+.csc-chooser-scroll { max-height:300px; overflow-y:auto; padding:8px 12px 12px 12px; }
+.csc-chooser-list   { }
+.csc-chooser-item   { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:4px; }
+.csc-chooser-item:hover { background:#f5f7f8; }
+.csc-chooser-label  { flex:1; font-size:0.8125rem; color:#222; cursor:pointer; }
+.csc-pos-input      { width:46px; min-height:30px; text-align:center; font-family:inherit; font-size:0.8125rem; padding:0 4px; border:1px solid #D1D3D4; border-radius:4px; color:#013a4f; }
+
+/* Form */
+.csc-form-field { display:flex; flex-direction:column; }
+.csc-form-label { font-size:0.75rem; font-weight:700; color:#013a4f; margin-bottom:4px; }
+.csc-form-input { font-family:inherit; font-size:0.8125rem; padding:8px 9px; border-radius:3px; border:1px solid; }
+.csc-form-error { margin:4px 0 0 0; font-size:0.75rem; color:#b23b3b; }
+.csc-delete-desc{ font-size:0.8125rem; color:#5b6b76; margin-top:10px; line-height:1.5; }
+
+/* ── Reduced motion ────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .csc-legend-arrow, .csc-resize-grip { transition:none !important; }
+  .csc-toast, .csc-modal-overlay, .csc-menu-popover, .csc-filter-popover,
+  .csc-combo-popover, .csc-cell-edit-btn { animation:none !important; }
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width:12px; min-height:12px; }
+::-webkit-scrollbar-thumb { background:#c2c8cc; border-radius:6px; border:3px solid #f5f5f5; }
+::-webkit-scrollbar-track { background:#f5f5f5; }
+
+/* ─── Scrollbar contrast ──────────────────────────────────────────────────
+   The default UA scrollbar thumb sits around 1.4:1 against these light
+   surfaces, well under the 3:1 WCAG 1.4.11 requirement for meaningful
+   non-text UI. These values put the thumb at roughly 4.6:1. */
+.csc-grid-scroll,
+.csc-filter-list,
+.csc-chooser-scroll,
+.csc-combo-popover,
+.csc-page-size-list {
+  scrollbar-width: thin;
+  scrollbar-color: #5A6A72 #E4E7E9;
+}
+.csc-grid-scroll::-webkit-scrollbar,
+.csc-filter-list::-webkit-scrollbar,
+.csc-chooser-scroll::-webkit-scrollbar,
+.csc-combo-popover::-webkit-scrollbar,
+.csc-page-size-list::-webkit-scrollbar { width: 12px; min-height:12px; }
+.csc-grid-scroll::-webkit-scrollbar-track,
+.csc-filter-list::-webkit-scrollbar-track,
+.csc-chooser-scroll::-webkit-scrollbar-track,
+.csc-combo-popover::-webkit-scrollbar-track,
+.csc-page-size-list::-webkit-scrollbar-track { background: #E4E7E9; }
+.csc-grid-scroll::-webkit-scrollbar-thumb,
+.csc-filter-list::-webkit-scrollbar-thumb,
+.csc-chooser-scroll::-webkit-scrollbar-thumb,
+.csc-combo-popover::-webkit-scrollbar-thumb,
+.csc-page-size-list::-webkit-scrollbar-thumb {
+  background: #5A6A72; border-radius: 6px; border: 2px solid #E4E7E9;
+}
+.csc-grid-scroll::-webkit-scrollbar-thumb:hover,
+.csc-filter-list::-webkit-scrollbar-thumb:hover,
+.csc-chooser-scroll::-webkit-scrollbar-thumb:hover,
+.csc-page-size-list::-webkit-scrollbar-thumb:hover { background: #3A4A52; }
+
+/* ─── Items-per-page combobox ─────────────────────────────────────────── */
+.csc-page-size-combo { position: relative; display: inline-block; }
+.csc-page-size-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid #9aa6ad; background: #fff; color: #075A92;
+  border-radius: 4px; padding: 3px 8px; font: inherit; font-size:0.75rem; cursor: pointer;
+}
+.csc-page-size-btn:hover { border-color: #075A92; }
+.csc-page-size-list {
+  position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 60;
+  margin: 0; padding: 4px 0; list-style: none; min-width: 88px; max-height: 180px; overflow-y: auto;
+  background: #fff; border: 1px solid #D1D3D4; border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+}
+.csc-page-size-opt {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; font-size:0.75rem; color: #3a4a52; cursor: pointer;
+}
+.csc-page-size-opt:hover { background: #EBF6FD; }
+.csc-page-size-opt[aria-selected="true"] { font-weight: 700; }
+.csc-opt-check { width: 12px; display: inline-block; }
+.csc-overlay-transparent { background: transparent; }
+
+/* Prev / Next are real <button>s now - reset chrome, show a true disabled state */
+
+/* ─── Chooser list ────────────────────────────────────────────────────── */
+/* <ul> reset - must NOT touch padding, which provides the list's inset
+   (set above as 8px 12px 12px 12px) and defines row alignment. */
+.csc-chooser-list { list-style: none; margin: 0; }
+.csc-chooser-pos {
+  font-size:0.6875rem; color: #5A6A72; margin-left: auto; padding-right: 8px; white-space: nowrap;
+}
+
+/* ─── Choose columns: Select all row ──────────────────────────────────────
+   Aligned so its checkbox sits directly above the per-column checkboxes.
+   The spacer stands in for the drag handle each list row has. */
+.csc-chooser-selectall-row {
+  display: flex; align-items: center; justify-content: space-between;
+  /* Sits INSIDE .csc-chooser-scroll, exactly like the list rows do, so both
+     resolve against the same content width (scrollbar already subtracted).
+     Horizontal padding therefore matches .csc-chooser-item's 10px, putting
+     the checkbox/label on the same vertical line and the count on the same
+     right edge as the position inputs. */
+  padding: 4px 10px 8px 10px;
+}
+.csc-selectall-btn {
+  /* gap must equal .csc-chooser-item's gap (10px) so the label lines up too */
+  display: inline-flex; align-items: center; gap: 10px;
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: inherit; font-size:0.8125rem; font-weight: 600; color: #222;
+  /* Deliberately NOT link-styled: this is a toggle, not navigation. */
+  text-decoration: none;
+}
+/* Stands in for the 9px drag handle each list row starts with. */
+.csc-selectall-spacer { width: 9px; flex: none; display: inline-block; }
+.csc-chooser-count { font-size:0.75rem; color: #5A6A72; white-space: nowrap; margin-left: auto; text-align: right; }
+.csc-chooser-empty {
+  margin: 0; padding: 18px 16px; font-size:0.8125rem; color: #5A6A72; text-align: center;
+}
+
+/* ─── Simplified Editable: chooser table ──────────────────────────────── */
+/* border-collapse:collapse drops the borders of a sticky <th> as it detaches,
+   which is what made the header and the rows read as overlapping. Separate
+   borders keep it opaque and the rule below the header travels with it. */
+.csc-chooser-table { width:100%; border-collapse:separate; border-spacing:0; }
+.csc-chooser-table th {
+  text-align:left; font-size:0.6875rem; text-transform:uppercase; letter-spacing:.4px;
+  color:#5A6A72; font-weight:700; padding:8px; background:#fff;
+  position:sticky; top:0; z-index:2; box-shadow:inset 0 -1px 0 #D1D3D4;
+}
+.csc-chooser-table td { padding:6px 8px; vertical-align:middle; background:#fff; }
+.csc-chooser-table tbody tr:first-child td { padding-top:8px; }
+.csc-chooser-row:hover td { background:#f5f7f8; }
+/* Select all sits outside the scroll container; these keep it on the same
+   left edge as the table's Show column and the same right edge as Pin. */
+.csc-chooser-selectall-fixed { padding:0 24px 0 12px; }
+.csc-chooser-scroll-table {
+  padding-top:0;
+  /* Reserve the gutter so the header row and Select all stay aligned whether
+     or not the list is long enough to scroll. */
+  scrollbar-gutter:stable;
+}
+.csc-cc-drag  { width:32px; }
+.csc-cc-show  { width:48px; }
+.csc-cc-order { width:66px; }
+.csc-cc-pin   { width:100px; }
+.csc-chooser-table .csc-chooser-label { flex:none; }
+/* The handle is a real <button> here, so the UA chrome needs resetting. */
+.csc-chooser-table .csc-drag-handle {
+  border:none; background:transparent; padding:2px 4px; font-family:inherit;
+  display:inline-flex; align-items:center; justify-content:center; border-radius:3px;
+}
+.csc-chooser-table .csc-drag-handle:hover:not(:disabled) { background:rgba(0,137,150,0.10); }
+.csc-chooser-table .csc-drag-handle:disabled { cursor:default; opacity:.35; }
+.csc-pin-select {
+  width:100%; min-height:30px; font-family:inherit; font-size:0.8125rem;
+  padding:0 4px; border:1px solid #D1D3D4; border-radius:4px; background:#fff; color:#013a4f;
+}
+/* Lines the Select all checkbox up with the Show column: 32px drag cell + 8px cell padding. */
+.csc-cc-selectall { padding-left: 40px; }
+
+/* ─── Grid empty state (all columns hidden) ──────────────────────────── */
+.csc-hidden { display: none; }
+.csc-grid-empty {
+  padding: 40px 24px; text-align: center; background: #fff;
+  border-top: 1px solid #D1D3D4;
+}
+.csc-grid-empty-title { margin: 0 0 6px; font-size:0.9375rem; font-weight: 700; color: #013a4f; }
+.csc-grid-empty-text  { margin: 0 0 16px; font-size:0.8125rem; color: #5A6A72; }
+/* Multi-column sort rank. Decorative: the same fact is in the header's
+   aria-label, so this is not the only way the level is conveyed. */
+.csc-sort-level {
+  font-size:0.5625rem; font-weight:700; line-height:1;
+  margin-left:2px; color:#013a4f;
+}
+/* ─── All Features: server data bar ──────────────────────────────────── */
+.csc-data-bar {
+  display:flex; flex-wrap:wrap; align-items:flex-end; gap:16px;
+  padding:12px 14px; border-bottom:1px solid #e6e8e9; background:#fafcfd;
+}
+.csc-field, .csc-search { display:flex; flex-direction:column; gap:4px; }
+.csc-search { flex:1 1 260px; min-width:200px; }
+.csc-field-label {
+  font-size:0.6875rem; text-transform:uppercase; letter-spacing:.4px;
+  color:#5b6b76; font-weight:700; padding:0;
+}
+.csc-search-wrap { position:relative; display:flex; }
+.csc-search-input {
+  width:100%; padding:7px 30px 7px 10px; font:inherit; font-size:0.8125rem;
+  border:1px solid #9aa6ad; border-radius:3px; background:#fff; color:#222;
+}
+/* type=search draws its own clear glyph, which sat next to ours and is neither
+   focusable nor named for assistive tech. Hidden so .csc-search-clear is the
+   only clear affordance. */
+.csc-search-input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
+.csc-search-clear {
+  position:absolute; right:2px; top:50%; transform:translateY(-50%);
+  /* 24px is below the 24x24 target minimum on its own, so the hit area is
+     padded out rather than the glyph enlarged. */
+  min-width:24px; min-height:24px; border:0; background:transparent;
+  font-size:1rem; line-height:1; color:#5b6b76; cursor:pointer; border-radius:3px;
+}
+.csc-search-clear:hover { background:#eef4f7; }
+.csc-select {
+  padding:7px 8px; font:inherit; font-size:0.8125rem; border:1px solid #9aa6ad;
+  border-radius:3px; background:#fff; color:#222; min-height:34px;
+}
+.csc-mode { border:0; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.csc-mode > .csc-field-label { display:block; }
+.csc-radio {
+  display:inline-flex; align-items:center; gap:6px; font-size:0.8125rem;
+  color:#222; min-height:24px; margin-right:12px; cursor:pointer;
+}
+.csc-data-bar-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.csc-btn-ghost {
+  font:inherit; font-size:0.75rem; font-weight:700; padding:7px 12px;
+  min-height:32px; border:1px solid #9aa6ad; border-radius:3px;
+  background:#fff; color:#013a4f; cursor:pointer;
+}
+.csc-btn-ghost:hover:not(:disabled) { background:#f0f8fa; }
+.csc-btn-ghost:disabled { opacity:.45; cursor:not-allowed; }
+.csc-data-status { flex-basis:100%; margin:0; font-size:0.75rem; color:#5b6b76; }
+
+/* Active filter chips */
+.csc-chips {
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+  padding:8px 14px; border-bottom:1px solid #e6e8e9;
+}
+.csc-chip {
+  display:inline-flex; align-items:center; gap:4px; padding:3px 4px 3px 10px;
+  background:#eef6f7; border:1px solid #cfe2ee; border-radius:12px;
+  font-size:0.75rem; color:#013a4f;
+}
+.csc-chip-x {
+  min-width:24px; min-height:24px; border:0; background:transparent;
+  color:#013a4f; font-size:0.875rem; line-height:1; cursor:pointer; border-radius:50%;
+}
+.csc-chip-x:hover { background:#d7e9ef; }
+.csc-chip-clear { margin-left:auto; }
+
+/* Error panel — inline and persistent, because a toast disappears before a
+   screen reader user can act on it and offers nowhere to put Retry. */
+.csc-error-panel {
+  margin:12px 14px; padding:14px 16px; border:1px solid #e3b5b8;
+  border-left:4px solid #a3232c; border-radius:3px; background:#fdf5f5;
+}
+.csc-error-title { margin:0 0 4px; font-size:0.8125rem; font-weight:700; color:#a3232c; }
+.csc-error-text  { margin:0 0 12px; font-size:0.8125rem; color:#5A6A72; }
+
+/* Skeleton rows */
+.csc-skeleton-row { border-bottom:1px solid #eceff1; }
+.csc-skeleton-bar {
+  display:block; height:10px; width:70%; border-radius:3px;
+  background:linear-gradient(90deg,#e9eef1 25%,#f4f7f9 37%,#e9eef1 63%);
+  background-size:400% 100%; animation:csc-shimmer 1.4s ease infinite;
+}
+@keyframes csc-shimmer { 0% { background-position:100% 50%; } 100% { background-position:0 50%; } }
+@media (prefers-reduced-motion: reduce) {
+  .csc-skeleton-bar { animation:none; background:#e9eef1; }
+}
+
+/* Infinite-scroll footer */
+.csc-load-more {
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  padding:14px; border-top:1px solid #e6e8e9; background:#fafcfd;
+}
+.csc-load-more-status { margin:0; font-size:0.75rem; color:#5b6b76; }
+
+/* ─── Editable column affordance (header) ─────────────────────────────── */
+.csc-editable-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; flex: none;
+}
+
+/* ─── Edited-cell marker ──────────────────────────────────────────────────
+   Corner triangle, the same convention spreadsheets use. Chosen over a border
+   or background tint because it never overlaps the cell text and does not
+   compete with zebra striping, row hover, or the focus outline.
+   Colour alone is not the signal: the cell also carries
+   aria-description="Edited. ..." so the state is announced. */
+.csc-data-cell.csc-cell-dirty { position: relative; }
+.csc-data-cell.csc-cell-dirty::after {
+  content: ""; position: absolute; top: 0; right: 0;
+  border-width: 0 7px 7px 0;
+  border-style: solid;
+  border-color: transparent #008996 transparent transparent;
+  pointer-events: none;
+}
+
+/* ─── In-cell edit affordance (mouse) ─────────────────────────────────────
+   Absolutely positioned on purpose: .csc-data-cell is a flex row with
+   overflow:hidden, so a normal flex child would consume content width and
+   push text into the clipped region (and skew autosize measurements).
+   Hidden until hover/focus so 70 visible pencils don't create noise. */
+.csc-data-cell.csc-cell-editable { position: relative; }
+.csc-cell-edit-btn {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: none; align-items: center; justify-content: center;
+  width: 20px; min-height:20px; padding: 0;
+  border: none; background: #fff; border-radius: 3px; cursor: pointer;
+}
+.csc-data-cell.csc-cell-editable:hover  .csc-cell-edit-btn,
+.csc-data-cell.csc-cell-editable:focus-within .csc-cell-edit-btn,
+.csc-cell-edit-btn:focus-visible { display: inline-flex; animation: cscIndicatorIn .22s ease; }
+@keyframes cscIndicatorIn { from { opacity: 0; } to { opacity: 1; } }
+.csc-cell-edit-btn:hover { background: #EBF6FD; }
+/* Sits above the dirty-corner marker, which is decorative. */
+.csc-cell-edit-btn { z-index: 1; }
+
+/* ─── Pagination prev/next target size ────────────────────────────────────
+   Was padding-only (~16px tall) while the page numbers were 28x28 - visually
+   mismatched and under the 24x24 WCAG 2.5.8 minimum. */
+
+/* ─── Scrollbar drag state (Chromium only) ────────────────────────────────
+   Firefox exposes no :active hook for native scrollbars - `scrollbar-color`
+   sets the rest state only - so the drag appearance there stays UA-controlled. */
+.csc-grid-scroll::-webkit-scrollbar-thumb:active,
+.csc-filter-list::-webkit-scrollbar-thumb:active,
+.csc-chooser-scroll::-webkit-scrollbar-thumb:active,
+.csc-page-size-list::-webkit-scrollbar-thumb:active { background: #2F3D44; }
+
+/* The chooser scroller is keyboard-focusable (Firefox does this for any
+   overflow:auto box); give it a visible focus ring like every other stop. */
+.csc-chooser-scroll:focus-visible {
+  outline: 2px solid #008996; outline-offset: -2px;
+}
+
+/* ─── Text size stepper ───────────────────────────────────────────────────
+   Sets the host's font-size; every dimension here is in rem, so boxes grow
+   with the text instead of clipping it (WCAG 1.4.4). */
+.csc-textsize { display:inline-flex; align-items:center; gap:0.25rem; margin-right:0.75rem; }
+/* CSC blue, matching the toolbar actions. */
+.csc-textsize-value { font-size:0.75rem; color:#075A92; font-weight:600; text-align:center; white-space:nowrap; }
+.csc-textsize-btn {
+  min-width:1.75rem; min-height:1.75rem;
+  display:inline-flex; align-items:center; justify-content:center;
+  border:1px solid #9aa6ad; border-radius:0.25rem; background:#fff;
+  font-family:inherit; font-size:1rem; font-weight:700; line-height:1;
+  color:#075A92; cursor:pointer;
+}
+.csc-textsize-btn:hover:not(:disabled) { background:#EBF6FD; border-color:#075A92; }
+.csc-textsize-btn:disabled { color:#9aa6ad; border-color:#D1D3D4; cursor:not-allowed; }
+.csc-textsize-btn:focus-visible { outline:2px solid #008996; outline-offset:1px; }
