@@ -109,20 +109,26 @@
 .csc-header-row .csc-gridcell.csc-pinned-right { z-index:3; background:#F5F5F5; }
 
 /* Boundary between the frozen block and the scrolling content, so it is clear
-   why those columns are standing still. box-shadow works on the data/action
-   cells - an element's own shadow is not clipped by its own overflow:hidden -
-   but the data column HEADER binds box-shadow inline for the drag drop-target
-   indicator, which would beat any stylesheet rule, so that one case is drawn
-   with a pseudo-element instead (.csc-header-cell has no overflow of its own,
-   only its inner .csc-header-content does, so the ::before is not clipped). */
-.csc-grid-inner .csc-gridcell.csc-pin-edge-left:not(.csc-header-cell)  { box-shadow: 6px 0 6px -4px rgba(1,58,79,0.28); }
-.csc-grid-inner .csc-gridcell.csc-pin-edge-right:not(.csc-header-cell) { box-shadow: -6px 0 6px -4px rgba(1,58,79,0.28); }
+   why those columns are standing still. Now the ONLY marker of a pinned column
+   in the grid - the header pin badge was removed - so it is a definite line
+   rather than a soft shadow, and darker than the #D1D3D4 rule between ordinary
+   columns so the two do not read as the same thing.
+   Drawn with box-shadow, not border-right: these cells are CSS grid tracks
+   sized to a measured width, and a border would add to that width and push the
+   frozen offsets out of step with pinOffsets(). A shadow takes no space.
+   The data column HEADER binds box-shadow inline for the drag drop-target
+   indicator, which beats any stylesheet rule, so that one case is drawn with a
+   pseudo-element instead (.csc-header-cell has no overflow of its own, only its
+   inner .csc-header-content does, so the ::before is not clipped). */
+.csc-grid-inner .csc-gridcell.csc-pin-edge-left:not(.csc-header-cell)  { box-shadow: 1px 0 0 0 rgba(1,58,79,0.55); }
+.csc-grid-inner .csc-gridcell.csc-pin-edge-right:not(.csc-header-cell) { box-shadow: -1px 0 0 0 rgba(1,58,79,0.55); }
 .csc-header-cell.csc-pin-edge-left::before,
 .csc-header-cell.csc-pin-edge-right::before {
-  content:""; position:absolute; top:0; min-height:100%; width:6px; pointer-events:none;
+  content:""; position:absolute; top:0; min-height:100%; width:1px; pointer-events:none;
+  background: rgba(1,58,79,0.55);
 }
-.csc-header-cell.csc-pin-edge-left::before  { right:-6px; background:linear-gradient(to right, rgba(1,58,79,0.22), rgba(1,58,79,0)); }
-.csc-header-cell.csc-pin-edge-right::before { left:-6px;  background:linear-gradient(to left,  rgba(1,58,79,0.22), rgba(1,58,79,0)); }
+.csc-header-cell.csc-pin-edge-left::before  { right:-1px; }
+.csc-header-cell.csc-pin-edge-right::before { left:-1px; }
 
 .csc-col-label {
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-right:auto; pointer-events:none;
@@ -333,6 +339,15 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
 .csc-chooser-item:hover { background:#f5f7f8; }
 .csc-chooser-label  { flex:1; font-size:0.8125rem; color:#222; cursor:pointer; }
 .csc-pos-input      { width:46px; min-height:30px; text-align:center; font-family:inherit; font-size:0.8125rem; padding:0 4px; border:1px solid #D1D3D4; border-radius:4px; color:#013a4f; }
+/* Stands in for the Order field on a hidden column, which has no position.
+   Same 46px box as the input so the column of numbers stays aligned. */
+.csc-pos-none       { display:inline-block; width:46px; text-align:center; color:#9aa6ad; font-size:0.8125rem; }
+
+/* Pin-section separator in the chooser, matching the boundary the grid draws.
+   A border on the row that STARTS a section, rather than an extra list item,
+   so the rule adds nothing for a screen reader to count. */
+.csc-chooser-item.csc-sec-start      { border-top:1px solid rgba(1,58,79,0.55); }
+.csc-chooser-row.csc-sec-start > td  { border-top:1px solid rgba(1,58,79,0.55); }
 
 /* Form */
 .csc-form-field { display:flex; flex-direction:column; }

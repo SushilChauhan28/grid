@@ -404,15 +404,9 @@
                             (click)="openMenu(col.field, $any($event.currentTarget)); $event.stopPropagation()">⋮</span>
                     }
 
-                    <!-- Pinned indicator -->
-                    @if (col.isPinned) {
-                      <span class="csc-ico" title="Pinned {{ col.pinnedDir }}" [style.color]="accent()">
-                        <svg width="11" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                          <path d="M8 1.5c2.2 0 4 1.7 4 3.9 0 2.9-4 8.6-4 8.6S4 8.3 4 5.4c0-2.2 1.8-3.9 4-3.9z"/>
-                          <circle cx="8" cy="5.3" r="1.6" fill="#F5F5F5"/>
-                        </svg>
-                      </span>
-                    }
+                    <!-- No pin badge here: the frozen block is marked by the
+                         separator at its boundary instead. Pin state still
+                         reaches a screen reader through headerAriaLabel. -->
                   </div>
 
                   <!-- Resize handle — WAI-ARIA separator pattern.
@@ -1069,6 +1063,7 @@
             <tbody>
               @for (ci of chooserItems(); track ci.field) {
                 <tr class="csc-chooser-row"
+                    [class.csc-sec-start]="ci.sepBefore"
                     [attr.draggable]="ci.draggable"
                     [style.box-shadow]="ci.dropShadow" [style.opacity]="ci.dragOpacity"
                     (dragstart)="onCDragStart(ci.field)"
@@ -1104,14 +1099,23 @@
                     <span class="csc-chooser-label" [id]="ci.labelId" (click)="toggleColumn(ci.field)">{{ ci.label }}</span>
                   </td>
                   <td class="csc-cc-order">
-                    <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
-                           role="spinbutton"
-                           [attr.aria-labelledby]="ci.labelId"
-                           [attr.aria-valuenow]="ci.pos" aria-valuemin="1" [attr.aria-valuemax]="ci.total"
-                           [attr.aria-valuetext]="ci.posLabel"
-                           [value]="ci.posVal"
-                           (keydown)="onPosKeyDown($event, ci.field)"
-                           (change)="setColumnPosition(ci.field, $any($event.target).value)"/>
+                    <!-- A hidden column gets no spinbutton at all: it has no
+                         visible position, so a control offering to set one
+                         would advertise a range it cannot honour. -->
+                    @if (ci.hasPos) {
+                      <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
+                             role="spinbutton"
+                             [attr.aria-labelledby]="ci.labelId"
+                             [attr.aria-valuenow]="ci.pos"
+                             [attr.aria-valuemin]="ci.posMin" [attr.aria-valuemax]="ci.posMax"
+                             [attr.aria-valuetext]="ci.posLabel"
+                             [value]="ci.posVal"
+                             (keydown)="onPosKeyDown($event, ci.field)"
+                             (change)="setColumnPosition(ci.field, $any($event.target).value)"/>
+                    } @else {
+                      <span class="csc-pos-none" aria-hidden="true">—</span>
+                      <span class="csc-sr-only">{{ ci.posLabel }}</span>
+                    }
                   </td>
                   <td class="csc-cc-pin">
                     <select class="csc-pin-select" [id]="ci.pinId"
@@ -1131,6 +1135,7 @@
         <ul class="csc-chooser-list">
         @for (ci of chooserItems(); track ci.field) {
           <li class="csc-chooser-item"
+               [class.csc-sec-start]="ci.sepBefore"
                [attr.draggable]="ci.draggable"
                [style.box-shadow]="ci.dropShadow" [style.opacity]="ci.dragOpacity"
                (dragstart)="onCDragStart(ci.field)"
@@ -1153,14 +1158,20 @@
               @if (ci.visible) { <span class="csc-chk-mark">✓</span> }
             </div>
             <span class="csc-chooser-label" [id]="ci.labelId" (click)="toggleColumn(ci.field)">{{ ci.label }}</span>
-            <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
-                   role="spinbutton"
-                   [attr.aria-labelledby]="ci.labelId"
-                   [attr.aria-valuenow]="ci.pos" aria-valuemin="1" [attr.aria-valuemax]="ci.total"
-                   [attr.aria-valuetext]="ci.posLabel"
-                   [value]="ci.posVal"
-                   (keydown)="onPosKeyDown($event, ci.field)"
-                   (change)="setColumnPosition(ci.field, $any($event.target).value)"/>
+            @if (ci.hasPos) {
+              <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
+                     role="spinbutton"
+                     [attr.aria-labelledby]="ci.labelId"
+                     [attr.aria-valuenow]="ci.pos"
+                     [attr.aria-valuemin]="ci.posMin" [attr.aria-valuemax]="ci.posMax"
+                     [attr.aria-valuetext]="ci.posLabel"
+                     [value]="ci.posVal"
+                     (keydown)="onPosKeyDown($event, ci.field)"
+                     (change)="setColumnPosition(ci.field, $any($event.target).value)"/>
+            } @else {
+              <span class="csc-pos-none" aria-hidden="true">—</span>
+              <span class="csc-sr-only">{{ ci.posLabel }}</span>
+            }
           </li>
         }
         </ul>

@@ -379,14 +379,29 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   rowH   = computed(() => this.densityProp === 'Compact' ? 34 : 42);
 
   orderedFields = computed(() => this.colOrder().filter(f => this.colDefs().some(c => c.field === f)));
-  visibleFields = computed(() => {
-    const visible = this.orderedFields().filter(f => !this.colHidden()[f]);
-    const pinned = this.pinnedCols() as any;
-    const left = visible.filter(f => pinned[f] === 'left');
-    const center = visible.filter(f => !pinned[f]);
-    const right = visible.filter(f => pinned[f] === 'right');
-    return [...left, ...center, ...right];
-  });
+
+  /** Which frozen block a column lives in. Every reorder is confined to one of
+   *  these: crossing a boundary would silently change the column's pin state,
+   *  which is the Pin control's decision, not a move's side effect. */
+  private sectionOf(field: string): 'left' | 'center' | 'right' {
+    return this.pinnedCols()[field] ?? 'center';
+  }
+
+  /** Applies hiding and pin grouping to a storage order. Split out of
+   *  visibleFields so a CANDIDATE order can be projected and compared before it
+   *  is committed - that is the only way to tell a reorder that changes what
+   *  the user sees from one that storage accepts but the screen undoes. */
+  private projectVisible(order: string[]): string[] {
+    const hidden = this.colHidden(), pinned = this.pinnedCols();
+    const vis = order.filter(f => !hidden[f]);
+    return [
+      ...vis.filter(f => pinned[f] === 'left'),
+      ...vis.filter(f => !pinned[f]),
+      ...vis.filter(f => pinned[f] === 'right'),
+    ];
+  }
+
+  visibleFields = computed(() => this.projectVisible(this.orderedFields()));
 
   /** The first visible data column that is NOT an action column becomes rowheader */
   rowHeaderField = computed(() => {
@@ -597,9 +612,12 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       if (sActive) headerAriaLabel += ', sorted ' + (isAsc ? 'ascending' : 'descending');
       if (sortLevel) headerAriaLabel += `, sort level ${sortLevel} of ${srv!.of}`;
       if (filterActive) headerAriaLabel += ', filter applied';
-      // Simplified Editable has no pin control in the header, so the pinned
-      // state has to be announced from the header itself.
-      if (isPinned && this.isSimple()) headerAriaLabel += ', pinned ' + pinned[field];
+      // The pin badge is gone from the header - the frozen boundary is drawn as
+      // a separator instead, which no screen reader can report. This label is
+      // now the only channel carrying pin state at the column itself, so it
+      // applies in every section, not just Simplified Editable (which never had
+      // a header pin control to fall back on).
+      if (isPinned) headerAriaLabel += ', pinned ' + pinned[field];
       // aria-description: keyboard hints
       // "editable column" is spoken, not just shown as a pencil glyph, so the
       // affordance is not colour/icon-only (WCAG 1.4.1).
@@ -615,7 +633,6 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
         headerAriaLabel, headerAriaDesc,
         sortBg: sActive ? tint : 'transparent', sortBorder: sActive ? '1px solid ' + a : '1px solid transparent',
         filterBg: filterActive ? tint : 'transparent', filterBorder: filterActive ? '1px solid ' + a : '1px solid transparent',
-        isPinned, pinnedDir: pinned[field] ? (pinned[field] as any) : null,
         showMenu: this.canMenu(), resizable,
         showEditableIcon: this.canEdit() && !this.isSimple() && this.isFieldEditable(field),
         draggable: canReorder, dragOpacity: this.dragField() === field ? 0.4 : 1,
@@ -1001,37 +1018,63 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     return groups;
   });
 
+  /** The chooser lists columns the way the grid renders them - left pinned,
+   *  unpinned, right pinned - so a position number in the dialog always names
+   *  the place the user actually sees. Hidden columns keep their slot inside
+   *  their own section rather than being exiled to a group of their own: this
+   *  dialog's first job is switching them back on. */
+  chooserOrder = computed(() => {
+    const all = this.orderedFields(), pinned = this.pinnedCols();
+    return [
+      ...all.filter(f => pinned[f] === 'left'),
+      ...all.filter(f => !pinned[f]),
+      ...all.filter(f => pinned[f] === 'right'),
+    ];
+  });
+
   chooserItems = computed((): ChooserItem[] => {
     const a = this.accent(), cq = this.chooserSearch().toLowerCase();
-    const orderAll = this.orderedFields(), hidden = this.colHidden();
+    const hidden = this.colHidden(), vis = this.visibleFields();
     const cdf = this.cDragField(), cdt = this.cDropTarget();
     const pinned = this.pinnedCols();
-    return orderAll.filter(f => this.colDefs().find(x => x.field === f)!.label.toLowerCase().includes(cq)).map(field => {
-      const pos = orderAll.indexOf(field), visible = !hidden[field];
+    const shown = this.chooserOrder().filter(f => this.colLabel(f).toLowerCase().includes(cq));
+    return shown.map((field, i) => {
+      const visible = !hidden[field], label = this.colLabel(field);
+      // 0 when hidden: a column that is not on screen has no visible position,
+      // and it is left out of the numbering rather than padding it.
+      const pos = vis.indexOf(field) + 1;
+      const { lo, hi } = this.sectionBounds(field);
       const isDrop = cdt === field && cdf && cdf !== field;
-      const label = this.colDefs().find(x => x.field === field)!.label;
       return {
         field, label, visible,
-        pos: pos + 1, total: orderAll.length,
-        posLabel: 'Position of ' + label + ' is ' + (pos + 1),
-        upId: 'chooser-up-' + field, downId: 'chooser-down-' + field,
+        pos, total: vis.length, hasPos: visible,
+        posMin: lo, posMax: hi,
+        posVal: visible ? String(pos) : '',
+        posLabel: visible
+          ? 'Position of ' + label + ' is ' + pos + ' of ' + vis.length
+          : label + ' is hidden and has no position',
         labelId: 'chooser-label-' + field,
-        isFirst: pos === 0, isLast: pos === orderAll.length - 1,
-        posFieldId: 'chooser-pos-' + field, boxBorder: visible ? a : '#9aa6ad', boxBg: visible ? a : '#fff',
-        // Dragging is disabled while a search is active: the list on screen is
-        // then a subset, so a drop between two visible rows has no unambiguous
-        // meaning in the full order.
-        bg: 'transparent', draggable: !cq, dragOpacity: cdf === field ? 0.4 : 1,
+        posFieldId: 'chooser-pos-' + field,
+        boxBorder: visible ? a : '#9aa6ad', boxBg: visible ? a : '#fff',
+        // Dragging is off while a search is active: the list on screen is then
+        // a subset, so a drop between two rows has no unambiguous meaning in
+        // the full order. It is off for hidden columns too - they have no place
+        // in the visible order to be moved within.
+        draggable: !cq && visible, dragOpacity: cdf === field ? 0.4 : 1,
         dropShadow: isDrop ? 'inset 0 3px 0 0 ' + a : 'none',
-        upColor: pos > 0 ? a : '#c2c8cc', downColor: pos < orderAll.length-1 ? a : '#c2c8cc',
-        posVal: String(pos + 1),
-        pin: pinned[field] ? String(pinned[field]) : '',
+        // A thin rule wherever the pin section changes, mirroring the frozen
+        // boundary drawn in the grid. Computed after the search filter so a
+        // filtered-away section never leaves a stray leading rule.
+        sepBefore: i > 0 && (pinned[shown[i - 1]] ?? '') !== (pinned[field] ?? ''),
+        pin: pinned[field] ?? '',
         pinId: 'chooser-pin-' + field,
         dragId: 'chooser-drag-' + field,
-        dragLabel: cq
-          ? 'Reordering unavailable while searching'
-          : 'Reorder ' + label + ', position ' + (pos + 1) + ' of ' + orderAll.length
-            + '. Press the up or down arrow key to move it.',
+        dragLabel: !visible
+          ? 'Reordering unavailable while ' + label + ' is hidden'
+          : cq
+            ? 'Reordering unavailable while searching'
+            : 'Reorder ' + label + ', position ' + pos + ' of ' + vis.length
+              + '. Press the up or down arrow key to move it.',
       };
     });
   });
@@ -1708,9 +1751,46 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const vis = this.visibleFields();
     const i = vis.indexOf(field); if (i < 0) return null;
     const j = i + dir; if (j < 0 || j >= vis.length) return null;
-    const pinned = this.pinnedCols();
-    const sectionOf = (f: string) => pinned[f] ?? 'center';
-    return sectionOf(vis[j]) === sectionOf(field) ? vis[j] : null;
+    return this.sectionOf(vis[j]) === this.sectionOf(field) ? vis[j] : null;
+  }
+
+  /** The 1-based range of visible positions a column may legally occupy: the
+   *  span of its own pin section. Used to bound the chooser's Order field, so
+   *  the number it accepts always means the same thing as the number it shows. */
+  private sectionBounds(field: string): { lo: number; hi: number } {
+    const vis = this.visibleFields(), sec = this.sectionOf(field);
+    let lo = -1, hi = -1;
+    vis.forEach((f, i) => { if (this.sectionOf(f) === sec) { if (lo < 0) lo = i; hi = i; } });
+    return { lo: lo + 1, hi: hi + 1 };
+  }
+
+  /** Rewrites the order of one pin section's VISIBLE columns and leaves every
+   *  other storage slot exactly where it was. Hidden columns therefore keep the
+   *  place they will reappear at - showing one again must not teleport it, and
+   *  unpinning must not invent a new position for anything.
+   *  `mutate` receives that section's visible fields in visible order. */
+  private withSectionResequenced(field: string, mutate: (seq: string[]) => string[]): string[] {
+    const order = this.orderedFields().slice(), hidden = this.colHidden();
+    const sec = this.sectionOf(field), slots: number[] = [];
+    order.forEach((f, i) => { if (!hidden[f] && this.sectionOf(f) === sec) slots.push(i); });
+    const seq = mutate(slots.map(i => order[i]));
+    if (seq.length !== slots.length) return order;
+    slots.forEach((slot, i) => { order[slot] = seq[i]; });
+    return order;
+  }
+
+  /** Commits a reordered storage array ONLY when it changes the order the user
+   *  can actually see, returning the column's new 1-based visible position.
+   *  Returns null when nothing on screen would move, so the caller stays silent:
+   *  a drop or a keypress is not by itself a move, and the old code announced
+   *  plenty that never happened (a pinned column dragged into the scrolling
+   *  block changed storage, got regrouped straight back, and still toasted). */
+  private applyOrderIfVisiblyChanged(field: string, order: string[]): number | null {
+    const before = this.visibleFields(), after = this.projectVisible(order);
+    if (after.length === before.length && after.every((f, i) => f === before[i])) return null;
+    this.patchSS({ colOrder: order });
+    const pos = after.indexOf(field);
+    return pos < 0 ? null : pos + 1;
   }
 
   /** True when Move Left / Move Right would do nothing, so the menu can mark
@@ -1719,78 +1799,117 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     return this.moveTargetField(field, dir) !== null;
   }
 
+  /** Move Left/Right from the column menu, and Up/Down from the chooser's drag
+   *  handle. Both are the same operation on the visible list - the chooser used
+   *  to swap raw storage indices instead, which is why a pinned column reported
+   *  a new position while standing still. */
   moveColumn(field: string, dir: number, fromChooser = false): void {
-    // The chooser lists every column in storage order, including hidden ones,
-    // and has no pin sections to respect - it keeps the simple adjacent swap.
-    const order = this.orderedFields().slice();
-    const i = order.indexOf(field);
-    let j: number;
-    if (fromChooser) {
-      j = i + dir;
-      if (j < 0 || j >= order.length) {
-        this.announceService.announce(this.colLabel(field) + ' is already ' + (dir < 0 ? 'first' : 'last'));
-        return;
-      }
-    } else {
-      const target = this.moveTargetField(field, dir);
-      if (!target) {
-        this.announceService.announce(
-          this.colLabel(field) + ' cannot move ' + (dir < 0 ? 'left' : 'right') + ' any further');
-        return;
-      }
-      j = order.indexOf(target);
-      if (j < 0) return;
-    }
-    [order[i], order[j]] = [order[j], order[i]];
-    this.patchSS({ colOrder: order });
     const dirWord = fromChooser ? (dir < 0 ? 'up' : 'down') : (dir < 0 ? 'left' : 'right');
-    if (fromChooser) {
-      const msg = this.colLabel(field) + ' moved ' + dirWord + ', position ' + (j + 1) + ' of ' + order.length;
-      this.announceService.announce(msg);
-      this.focusAfterRender('chooser-' + (dir < 0 ? 'up' : 'down') + '-' + field);
-    } else {
-      // Report the position the user can actually see, within the visible
-      // list, rather than the index in the storage array.
-      const vis = this.visibleFields(), vPos = vis.indexOf(field) + 1;
-      this.showToast(this.colLabel(field) + ' moved ' + dirWord + ', position ' + vPos + ' of ' + vis.length);
+    const refocus = () => { if (fromChooser) this.focusAfterRender('chooser-drag-' + field); };
+    const target = this.moveTargetField(field, dir);
+    if (!target) {
+      this.announceService.announce(
+        this.colLabel(field) + ' cannot move ' + dirWord + ' any further');
+      refocus();
+      return;
     }
+    const order = this.withSectionResequenced(field, seq => {
+      const s = seq.slice(), i = s.indexOf(field), j = s.indexOf(target);
+      if (i < 0 || j < 0) return seq;
+      [s[i], s[j]] = [s[j], s[i]];
+      return s;
+    });
+    const vPos = this.applyOrderIfVisiblyChanged(field, order);
+    if (vPos === null) { refocus(); return; }
+    const msg = this.colLabel(field) + ' moved ' + dirWord
+      + ', position ' + vPos + ' of ' + this.visibleFields().length;
+    if (fromChooser) this.announceService.announce(msg); else this.showToast(msg);
+    refocus();
   }
 
+  /** Drag-and-drop reorder, shared by the header row and the chooser list. */
   reorderTo(from: string, to: string): void {
     if (!from || from === to) return;
-    const o = this.orderedFields().filter(f => f !== from);
-    const idx = o.indexOf(to); if (idx < 0) return;
-    o.splice(idx, 0, from); this.patchSS({ colOrder: o });
+    const hidden = this.colHidden();
+    if (hidden[from] || hidden[to]) return; // no visible order to move within
+    // A drop across a pin boundary is refused rather than half-applied: the
+    // regrouping in projectVisible would put the column straight back, so the
+    // drag would move nothing while still claiming it had. Changing the pin
+    // itself belongs to the Pin control.
+    if (this.sectionOf(from) !== this.sectionOf(to)) {
+      this.announceService.announce(
+        this.colLabel(from) + ' cannot move outside its pinned section');
+      return;
+    }
+    const order = this.withSectionResequenced(from, seq => {
+      const s = seq.filter(f => f !== from), i = s.indexOf(to);
+      if (i < 0) return seq;
+      s.splice(i, 0, from);
+      return s;
+    });
     this.menuField.set(null);
-    this.showToast(this.colLabel(from) + ' moved');
+    const vPos = this.applyOrderIfVisiblyChanged(from, order);
+    if (vPos === null) return; // dropped where it already was - nothing moved
+    this.showToast(this.colLabel(from) + ' moved, position '
+      + vPos + ' of ' + this.visibleFields().length);
   }
 
   setColumnPosition(field: string, val: string): void {
-    const order = this.orderedFields(), total = order.length;
+    const vis = this.visibleFields(), cur = vis.indexOf(field);
+    if (cur < 0) return; // hidden: no visible position to set
+    const { lo, hi } = this.sectionBounds(field);
     const n = parseInt(val, 10);
-    if (!n || n < 1 || n > total) {
-      // Reject out-of-range instead of silently clamping, and say why.
-      this.announceService.announce('Enter a position between 1 and ' + total);
-      this.focusAfterRender('chooser-pos-' + field);
+    // Rejected, never clamped. Clamping would quietly give the number the user
+    // typed a different meaning, and anything outside this column's own pin
+    // section would change its pin state as a side effect. Nothing is written
+    // and nothing is announced as a move.
+    if (!n || n < lo || n > hi) {
+      this.announceService.announce('Enter a position between ' + lo + ' and ' + hi);
+      this.resyncPosInput(field);
       return;
     }
-    const target = n - 1;
-    if (order.indexOf(field) === target) return;
-    const o = order.filter(f => f !== field); o.splice(target, 0, field);
-    this.patchSS({ colOrder: o });
-    this.announceService.announce(this.colLabel(field) + ' moved to position ' + (target + 1) + ' of ' + total);
-    this.focusAfterRender('chooser-pos-' + field);
+    if (n !== cur + 1) {
+      const order = this.withSectionResequenced(field, seq => {
+        const s = seq.filter(f => f !== field);
+        s.splice(n - lo, 0, field);
+        return s;
+      });
+      const vPos = this.applyOrderIfVisiblyChanged(field, order);
+      if (vPos !== null) {
+        this.announceService.announce(this.colLabel(field) + ' moved to position '
+          + vPos + ' of ' + this.visibleFields().length);
+      }
+    }
+    this.resyncPosInput(field);
+  }
+
+  /** Refocuses the Order field AND puts its text back in step with the model.
+   *  Angular's [value] binding only writes when the bound value changes, so a
+   *  rejected entry would otherwise sit in the box showing a position the
+   *  column does not have - contradicting both the grid and the aria-valuenow
+   *  right beside it, which is the exact mismatch this dialog is meant to end. */
+  private resyncPosInput(field: string): void {
+    const id = 'chooser-pos-' + field;
+    this.focusAfterRender(id);
+    setTimeout(() => {
+      const el = document.getElementById(id) as HTMLInputElement | null;
+      const pos = this.visibleFields().indexOf(field) + 1;
+      if (el && pos > 0) el.value = String(pos);
+    });
   }
 
   /** Spinbutton keys on the position field. Handled explicitly (rather than
    *  relying on <input type="number">'s native spinner) so focus survives the
-   *  re-render that reordering triggers. */
+   *  re-render that reordering triggers. Bounded by the column's pin section,
+   *  matching the range the field advertises as aria-valuemin/max. */
   onPosKeyDown(e: KeyboardEvent, field: string): void {
-    const order = this.orderedFields(), total = order.length, cur = order.indexOf(field) + 1;
-    if (e.key === 'ArrowUp')   { e.preventDefault(); if (cur > 1)     this.setColumnPosition(field, String(cur - 1)); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); if (cur < total) this.setColumnPosition(field, String(cur + 1)); return; }
-    if (e.key === 'Home')      { e.preventDefault(); this.setColumnPosition(field, '1'); return; }
-    if (e.key === 'End')       { e.preventDefault(); this.setColumnPosition(field, String(total)); return; }
+    const cur = this.visibleFields().indexOf(field) + 1;
+    if (cur < 1) return;
+    const { lo, hi } = this.sectionBounds(field);
+    if (e.key === 'ArrowUp')   { e.preventDefault(); if (cur > lo) this.setColumnPosition(field, String(cur - 1)); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (cur < hi) this.setColumnPosition(field, String(cur + 1)); return; }
+    if (e.key === 'Home')      { e.preventDefault(); this.setColumnPosition(field, String(lo)); return; }
+    if (e.key === 'End')       { e.preventDefault(); this.setColumnPosition(field, String(hi)); return; }
   }
 
   // Auto-size: measure content width

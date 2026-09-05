@@ -33,7 +33,7 @@ export interface ColumnView {
   ariaColIndex:string; cellId:string; tabIndex:string;
   headerAriaLabel:string; headerAriaDesc:string;
   sortBg:string; sortBorder:string; filterBg:string; filterBorder:string;
-  isPinned:boolean; pinnedDir:string|null; showMenu:boolean; resizable:boolean;
+  showMenu:boolean; resizable:boolean;
   draggable:boolean; dragOpacity:number; dropShadow:string;
   isRowHeader:boolean; isResizing:boolean;
   /** Shows the pencil affordance in the header for editable columns. */
@@ -71,10 +71,20 @@ export interface PageButton { isGap:boolean; notGap:boolean; label:string; ariaL
 export interface ToolbarAction { label:string; icon:string; }
 export interface FilterValue { label:string; checked:boolean; boxBorder:string; boxBg:string; }
 export interface ChooserItem {
+  /** 1-based position among the VISIBLE columns, matching what the grid shows.
+   *  0 for a hidden column, which has no position — see `hasPos`. */
   pos:number; total:number; posLabel:string;
-  upId:string; downId:string; isFirst:boolean; isLast:boolean; labelId:string;
+  /** False for hidden columns: they keep their checkbox but show no number,
+   *  and are left out of the numbering entirely. */
+  hasPos:boolean;
+  /** Inclusive bounds of the column's own pin section. The Order field accepts
+   *  only this range; anything else would change the pin, not the position. */
+  posMin:number; posMax:number;
+  /** Draws the thin rule that separates left-pinned / unpinned / right-pinned. */
+  sepBefore:boolean;
+  labelId:string;
   field:string; label:string; visible:boolean; posFieldId:string; boxBorder:string; boxBg:string;
-  bg:string; draggable:boolean; dragOpacity:number; dropShadow:string; upColor:string; downColor:string; posVal:string;
+  draggable:boolean; dragOpacity:number; dropShadow:string; posVal:string;
   /** '' | 'left' | 'right' — the empty string is the <select> value for "not pinned". */
   pin:string; pinId:string; dragId:string; dragLabel:string;
 }
