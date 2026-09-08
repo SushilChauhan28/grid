@@ -130,7 +130,8 @@
         <div class="csc-grid-empty" role="status">
           <p class="csc-grid-empty-title">No columns selected</p>
           <p class="csc-grid-empty-text">Every column is currently hidden. Use Choose columns to show them again.</p>
-          <button type="button" class="csc-btn-primary" [style.background]="accent()" (click)="openChooser()">Choose columns</button>
+          <button type="button" id="csc-empty-chooser-btn" class="csc-btn-primary"
+                  [style.background]="accent()" (click)="openChooser()">Choose columns</button>
         </div>
       }
 
@@ -219,10 +220,43 @@
         }
       }
 
+      <!-- Grid area. This wrapper exists only to anchor the editable badge to
+           the TABLE's own top-left corner: .csc-grid-scroll scrolls and clips,
+           so a badge inside it would slide away with the columns, and on the
+           card it landed beside the "Grid Section" heading - decorating the
+           title instead of marking the grid. -->
+      <div class="csc-grid-area">
+        <!-- Distinct from the per-column pencil: that one says "this COLUMN can
+             be edited", this says "this grid supports inline editing". A grid
+             property, which is why it is not repeated in Choose columns.
+             Decorative - the same fact reaches a screen reader through the
+             grid's own accessible name. -->
+        @if (canEdit()) {
+          <!-- accent() is the same colour the per-cell edit action uses, so the
+               two pencils read as one idea at two scales. -->
+          <span class="csc-editable-badge" aria-hidden="true" [style.color]="accent()"
+                title="Editable grid — inline editing enabled">
+            <!-- stroke-width drops to 1.2: at 22px the 1.6 that suited a 13px
+                 glyph renders as a heavy blob. -->
+            <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+              <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
+            </svg>
+          </span>
+        }
+
       <!-- Grid scroll area -->
       <div class="csc-grid-scroll" [class.csc-hidden]="noColumnsVisible()">
         <div class="csc-grid-inner">
-          <div role="grid"
+          <!-- Drag guide: spans header + rows so the drop position reads against
+               the data, not just the header strip. -->
+          @if (resizeGuideX() !== null) {
+            <div class="csc-resize-guide" aria-hidden="true" [style.left.px]="resizeGuideX()"></div>
+          }
+          <!-- tabindex=-1 makes the grid itself a last-resort focus target: if
+               every column is hidden there is no cell left to land on, and
+               focus would otherwise be stranded on <body>. Not a tab stop -
+               the roving cell is. -->
+          <div role="grid" id="csc-grid-root" tabindex="-1"
                [attr.aria-label]="gridLabel()"
                aria-describedby="grid-instructions"
                [attr.aria-rowcount]="ariaRowCount()"
@@ -234,16 +268,27 @@
             <!-- Header row -->
             <div role="row" aria-rowindex="1" class="csc-header-row" [style.grid-template-columns]="gridCols()">
 
-              <!-- Expand col header (sections that support expandable rows) -->
-              @if (canExpand()) {
-                <div role="columnheader" id="gc-header-expand-col"
-                     [attr.tabindex]="expandColHeaderTabIndex()"
-                     class="csc-gridcell csc-header-action" aria-label="Expand actions"
-                     [class.csc-pinned-left]="pinLeft('expand-col') !== null"
-                     [class.csc-pin-edge-left]="isPinEdgeLeft('expand-col')"
-                     [style.left.px]="pinLeft('expand-col')"
+              <!-- One loop for every column, action or data. Ordering, pinning
+                   and hiding all come from visibleFields(), so the grid's own
+                   controls move exactly like the columns beside them instead of
+                   being nailed to the front of the row. -->
+              @for (col of columns(); track col.field) {
+              @switch (col.kind) {
+
+              @case ('expand') {
+                <div role="columnheader" [id]="col.cellId"
+                     [attr.aria-colindex]="col.ariaColIndex"
+                     [attr.tabindex]="col.tabIndex"
+                     class="csc-gridcell csc-header-action"
+                     [attr.aria-label]="col.headerAriaLabel"
+                     [class.csc-pinned-left]="pinLeft(col.field) !== null"
+                     [class.csc-pinned-right]="pinRight(col.field) !== null"
+                     [class.csc-pin-edge-left]="isPinEdgeLeft(col.field)"
+                     [class.csc-pin-edge-right]="isPinEdgeRight(col.field)"
+                     [style.left.px]="pinLeft(col.field)"
+                     [style.right.px]="pinRight(col.field)"
                      [attr.aria-description]="expandColHeaderDesc()"
-                     (focus)="onCellFocus('header', 'expand-col')">
+                     (focus)="onCellFocus('header', col.field)">
                   <button type="button" class="csc-ico csc-ico-btn" tabindex="-1"
                           [attr.title]="allExpanded() ? 'Collapse all rows' : 'Expand all rows'"
                           [attr.aria-label]="allExpanded() ? 'Collapse all rows' : 'Expand all rows'"
@@ -255,6 +300,7 @@
                 </div>
               }
 
+              @case ('lead') {
               <!-- Lead cell of the header row - a gridcell, NOT a columnheader.
                    A columnheader is the LABEL for the data beneath it, and
                    screen readers echo that label on every row as the user
@@ -278,12 +324,15 @@
                    No key bindings on the checkbox on purpose: the grid's own
                    key handler already maps Space and Enter on this cell to
                    selectAll(); binding here too would toggle twice. -->
-              <div role="gridcell" aria-colindex="1" id="gc-header-lead"
+              <div role="gridcell" [attr.aria-colindex]="col.ariaColIndex" id="gc-header-lead"
                    [attr.tabindex]="leadHeaderTabIndex()"
                    class="csc-gridcell csc-header-lead"
-                   [class.csc-pinned-left]="pinLeft('lead') !== null"
-                   [class.csc-pin-edge-left]="isPinEdgeLeft('lead')"
-                   [style.left.px]="pinLeft('lead')"
+                   [class.csc-pinned-left]="pinLeft(col.field) !== null"
+                   [class.csc-pinned-right]="pinRight(col.field) !== null"
+                   [class.csc-pin-edge-left]="isPinEdgeLeft(col.field)"
+                   [class.csc-pin-edge-right]="isPinEdgeRight(col.field)"
+                   [style.left.px]="pinLeft(col.field)"
+                   [style.right.px]="pinRight(col.field)"
                    (focus)="onLeadHeaderFocus()">
                 <div role="checkbox"
                      [attr.aria-checked]="selectAllAriaChecked()"
@@ -301,22 +350,32 @@
                 </div>
                 <span id="selectall-count-desc" class="csc-sr-only">{{ selectAllCountDesc() }}</span>
               </div>
+              }
 
-              <!-- Delete col header (sections that support row deletion) -->
-              @if (canDelete()) {
-                <div role="columnheader" id="gc-header-delete-col"
-                     [attr.tabindex]="deleteColHeaderTabIndex()"
-                     class="csc-gridcell csc-header-action" aria-label="Delete actions"
-                     [class.csc-pinned-left]="pinLeft('delete-col') !== null"
-                     [class.csc-pin-edge-left]="isPinEdgeLeft('delete-col')"
-                     [style.left.px]="pinLeft('delete-col')"
+              @case ('delete') {
+                <div role="columnheader" [id]="col.cellId"
+                     [attr.aria-colindex]="col.ariaColIndex"
+                     [attr.tabindex]="col.tabIndex"
+                     class="csc-gridcell csc-header-action"
+                     [attr.aria-label]="col.headerAriaLabel"
+                     [class.csc-pinned-left]="pinLeft(col.field) !== null"
+                     [class.csc-pinned-right]="pinRight(col.field) !== null"
+                     [class.csc-pin-edge-left]="isPinEdgeLeft(col.field)"
+                     [class.csc-pin-edge-right]="isPinEdgeRight(col.field)"
+                     [style.left.px]="pinLeft(col.field)"
+                     [style.right.px]="pinRight(col.field)"
                      [attr.aria-description]="deleteColHeaderDesc()"
-                     (focus)="onCellFocus('header', 'delete-col')">
+                     (focus)="onCellFocus('header', col.field)">
+                  <!-- One button, never disabled, never hidden. Nothing selected
+                       means Delete all; a selection means Delete selected. Only
+                       the label and the confirm text change. -->
                   <button type="button" class="csc-ico csc-ico-btn csc-delete-btn" tabindex="-1"
-                          [disabled]="!hasSelection()"
-                          [attr.title]="hasSelection() ? 'Delete ' + selCount() + ' selected' : 'Delete selected (select rows first)'"
-                          [attr.aria-label]="hasSelection() ? 'Delete ' + selCount() + ' selected records' : 'Delete selected records, no rows selected'"
-                          [style.opacity]="hasSelection() ? 1 : 0.35"
+                          [attr.title]="deleteAllMode()
+                            ? 'Delete all ' + deleteAllCount().toLocaleString() + ' records'
+                            : 'Delete selected (' + selCount() + ')'"
+                          [attr.aria-label]="deleteAllMode()
+                            ? 'Delete all ' + deleteAllCount().toLocaleString() + ' records'
+                            : 'Delete selected records (' + selCount() + ')'"
                           (click)="openBulkDeleteConfirm($event)">
                     <svg width="13" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                       <path d="M2.5 4.5h11"/>
@@ -327,8 +386,7 @@
                 </div>
               }
 
-              <!-- Data column headers -->
-              @for (col of columns(); track col.field) {
+              @default {
                 <div role="columnheader"
                      [attr.aria-colindex]="col.ariaColIndex"
                      [attr.aria-sort]="col.ariaSort"
@@ -430,6 +488,9 @@
                   }
                 </div>
               }
+
+              }
+              }
             </div>
 
             <!-- Data rows.
@@ -453,16 +514,24 @@
                      [style.min-height.px]="rowH()"
                      [style.background]="row.bg">
 
-                  <!-- Expand cell (Expandable section only) -->
-                  @if (row.showChevron) {
+                  <!-- One loop for every cell, action or data - same order as
+                       the header, from the same visibleFields(). -->
+                  @for (cell of row.cells; track cell.field) {
+                  @switch (cell.kind) {
+
+                  @case ('expand') {
                     <div role="gridcell"
-                         [id]="row.expandCellId"
-                         [attr.tabindex]="row.expandTabIndex"
+                         [id]="cell.cellId"
+                         [attr.aria-colindex]="cell.ariaColIndex"
+                         [attr.tabindex]="cell.tabIndex"
                          class="csc-gridcell csc-action-cell"
-                         [class.csc-pinned-left]="pinLeft('expand-col') !== null"
-                         [class.csc-pin-edge-left]="isPinEdgeLeft('expand-col')"
-                         [style.left.px]="pinLeft('expand-col')"
-                         (focus)="onCellFocus(row.id, 'expand-col')">
+                         [class.csc-pinned-left]="pinLeft(cell.field) !== null"
+                         [class.csc-pinned-right]="pinRight(cell.field) !== null"
+                         [class.csc-pin-edge-left]="isPinEdgeLeft(cell.field)"
+                         [class.csc-pin-edge-right]="isPinEdgeRight(cell.field)"
+                         [style.left.px]="pinLeft(cell.field)"
+                         [style.right.px]="pinRight(cell.field)"
+                         (focus)="onCellFocus(row.id, cell.field)">
                       <button type="button" class="csc-ico csc-ico-btn" title="Expand row"
                               tabindex="-1"
                               [attr.aria-label]="(row.isExpanded ? 'Collapse' : 'Expand') + ' details for ' + row.entity"
@@ -475,15 +544,19 @@
                     </div>
                   }
 
+                  @case ('lead') {
                   <!-- Lead cell: checkbox only -->
-                  <div role="gridcell" aria-colindex="1"
-                       [id]="row.leadCellId"
-                       [attr.tabindex]="row.leadTabIndex"
+                  <div role="gridcell" [attr.aria-colindex]="cell.ariaColIndex"
+                       [id]="cell.cellId"
+                       [attr.tabindex]="cell.tabIndex"
                        class="csc-gridcell csc-lead-cell"
-                       [class.csc-pinned-left]="pinLeft('lead') !== null"
-                       [class.csc-pin-edge-left]="isPinEdgeLeft('lead')"
-                       [style.left.px]="pinLeft('lead')"
-                       (focus)="onCellFocus(row.id, 'lead')">
+                       [class.csc-pinned-left]="pinLeft(cell.field) !== null"
+                       [class.csc-pinned-right]="pinRight(cell.field) !== null"
+                       [class.csc-pin-edge-left]="isPinEdgeLeft(cell.field)"
+                       [class.csc-pin-edge-right]="isPinEdgeRight(cell.field)"
+                       [style.left.px]="pinLeft(cell.field)"
+                       [style.right.px]="pinRight(cell.field)"
+                       (focus)="onCellFocus(row.id, cell.field)">
                   <!-- Row select checkbox. The name FLIPS - "Select X" /
                        "Deselect X" - because it is the only state channel
                        that actually reaches a screen reader user here: focus
@@ -514,17 +587,21 @@
                     </div>
                   </div>
                   </div>
+                  }
 
-                  <!-- Delete cell (sections that support row deletion) -->
-                  @if (canDelete()) {
+                  @case ('delete') {
                     <div role="gridcell"
-                         [id]="row.deleteCellId"
-                         [attr.tabindex]="row.deleteTabIndex"
+                         [id]="cell.cellId"
+                         [attr.aria-colindex]="cell.ariaColIndex"
+                         [attr.tabindex]="cell.tabIndex"
                          class="csc-gridcell csc-action-cell"
-                         [class.csc-pinned-left]="pinLeft('delete-col') !== null"
-                         [class.csc-pin-edge-left]="isPinEdgeLeft('delete-col')"
-                         [style.left.px]="pinLeft('delete-col')"
-                         (focus)="onCellFocus(row.id, 'delete-col')">
+                         [class.csc-pinned-left]="pinLeft(cell.field) !== null"
+                         [class.csc-pinned-right]="pinRight(cell.field) !== null"
+                         [class.csc-pin-edge-left]="isPinEdgeLeft(cell.field)"
+                         [class.csc-pin-edge-right]="isPinEdgeRight(cell.field)"
+                         [style.left.px]="pinLeft(cell.field)"
+                         [style.right.px]="pinRight(cell.field)"
+                         (focus)="onCellFocus(row.id, cell.field)">
                       @if (row.showDelete) {
                         <button type="button" class="csc-action-btn csc-delete-btn"
                                 tabindex="-1"
@@ -541,8 +618,7 @@
                     </div>
                   }
 
-                  <!-- Data cells -->
-                  @for (cell of row.cells; track cell.field) {
+                  @default {
                     <div [attr.role]="cell.isRowHeader ? 'rowheader' : 'gridcell'"
                          [attr.aria-colindex]="cell.ariaColIndex"
                          [id]="cell.cellId"
@@ -602,7 +678,7 @@
                         <span class="csc-cell-text">{{ cell.value }}</span>
                         @if (cell.isCombo) {
                           <button type="button" class="csc-cell-edit-btn csc-cell-combo-btn" tabindex="-1"
-                                  [attr.aria-label]="'Choose ' + colLabel(cell.field) + ' for ' + row.entity"
+                                  aria-hidden="true"
                                   [attr.title]="'Choose ' + colLabel(cell.field)"
                                   [style.color]="accent()"
                                   (click)="openComboCell(row.id, cell.field); $event.stopPropagation()">
@@ -611,13 +687,19 @@
                             </svg>
                           </button>
                         } @else if (cell.editable) {
-                          <!-- Single-click alternative to double-click. Absolutely
-                               positioned so it never joins the flex row: adding it
-                               as a normal child would eat into the cell's content
-                               width (the cell is overflow:hidden) and skew autosize.
-                               tabindex=-1 keeps the grid a single tab stop. -->
+                          <!-- A MOUSE affordance: single-click instead of
+                               double-click. Absolutely positioned so it never
+                               joins the flex row - as a normal child it would eat
+                               into the cell's content width (the cell is
+                               overflow:hidden) and skew autosize.
+                               aria-hidden because tabindex=-1 means no keyboard
+                               user can ever reach it, and the cell already says
+                               "Press Enter to edit" through aria-description.
+                               Exposing it named a button that could not be
+                               operated and repeated an action the cell had
+                               already offered. -->
                           <button type="button" class="csc-cell-edit-btn" tabindex="-1"
-                                  [attr.aria-label]="'Edit ' + colLabel(cell.field) + ' for ' + row.entity"
+                                  aria-hidden="true"
                                   [attr.title]="'Edit ' + colLabel(cell.field)"
                                   [style.color]="accent()"
                                   (click)="startCellEdit(row.id, cell.field); $event.stopPropagation()">
@@ -628,6 +710,9 @@
                         }
                       }
                     </div>
+                  }
+
+                  }
                   }
                 </div>
 
@@ -736,6 +821,7 @@
             </div>
           }
         </div>
+      </div>
       </div>
 
       <!-- Pagination -->
@@ -994,12 +1080,21 @@
 <!-- Choose Columns modal -->
 @if (chooserOpen()) {
   <div class="csc-modal-overlay" (click)="closeChooser()">
+    <!-- The reorder instructions used to live in the table's <caption>, which
+         role="presentation" removes. On the dialog they are announced once, on
+         open, instead of only when a table-reading command reaches the caption. -->
     <div id="chooser-dialog" role="dialog" aria-modal="true" aria-labelledby="chooser-title"
+         [attr.aria-describedby]="isSimple() ? 'chooser-hint' : null"
          class="csc-modal" [class.csc-modal-wide]="isSimple()" focusTrap
          (click)="$event.stopPropagation()"
          (keydown)="trapTabKey($event, 'chooser-dialog')">
       <div class="csc-modal-header">
         <span id="chooser-title" role="heading" aria-level="2" class="csc-modal-title">Choose columns</span>
+        @if (isSimple()) {
+          <span id="chooser-hint" class="csc-sr-only">
+            Column settings. Reorder with the drag handle, or by typing a position in the Order field.
+          </span>
+        }
         <button type="button" class="csc-modal-close" aria-label="Close choose columns dialog" (click)="closeChooser()">✕</button>
       </div>
       <div class="csc-modal-search-wrap">
@@ -1047,10 +1142,14 @@
         } @else if (isSimple()) {
           <!-- Simplified Editable: the header carries no layout controls, so
                order, visibility and pinning are all managed here. -->
-          <table class="csc-chooser-table">
-            <caption class="csc-sr-only">
-              Column settings. Reorder with the drag handle, or by typing a position in the Order field.
-            </caption>
+          <!-- role=presentation: this is a layout grid of controls, not tabular
+               data, so the row/column relationships add nothing to read. That
+               also drops the <th> headers and the caption from the
+               accessibility tree, which is why every control below names itself
+               in full ("Document order", "Document pin") instead of leaning on
+               the column it sits under. The caption's instructions moved to the
+               dialog's own description, where they are still announced. -->
+          <table class="csc-chooser-table" role="presentation">
             <thead>
               <tr>
                 <th scope="col" class="csc-cc-drag"><span class="csc-sr-only">Reorder</span></th>
@@ -1071,24 +1170,31 @@
                     (drop)="onCDrop(ci.field, $event)"
                     (dragend)="onCDragEnd()">
                   <td class="csc-cc-drag">
-                    <!-- A button, not a bare handle: dragging must never be the
-                         only way to reorder (WCAG 2.5.7). -->
-                    <button type="button" class="csc-drag-handle" [id]="ci.dragId"
-                            [style.color]="accent()"
-                            [attr.aria-label]="ci.dragLabel"
-                            [disabled]="!ci.draggable"
-                            (keydown)="onChooserDragKey($event, ci.field)">
+                    <!-- A mouse affordance only, deliberately out of the tab
+                         order: it is a grip for dragging, and a tab stop that
+                         does nothing on Enter or Space is worse than no tab
+                         stop at all. Keyboard reordering lives on the Order
+                         spinbutton in this same row, so dragging is still never
+                         the only way to reorder (WCAG 2.5.7). -->
+                    <span class="csc-drag-handle" aria-hidden="true"
+                          [style.color]="accent()"
+                          [class.csc-drag-disabled]="!ci.draggable">
                       <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor" aria-hidden="true">
                         <circle cx="2" cy="2" r="1.3"/><circle cx="7" cy="2" r="1.3"/>
                         <circle cx="2" cy="6.5" r="1.3"/><circle cx="7" cy="6.5" r="1.3"/>
                         <circle cx="2" cy="11" r="1.3"/><circle cx="7" cy="11" r="1.3"/>
                       </svg>
-                    </button>
+                    </span>
                   </td>
                   <td class="csc-cc-show">
+                    <!-- For an action column this checkbox switches the whole
+                         feature, so the description says so - "hidden" would
+                         understate what unchecking it does. -->
                     <div role="checkbox" [id]="'chooser-chk-' + ci.field"
-                         [attr.aria-checked]="ci.visible" [attr.aria-labelledby]="ci.labelId" tabindex="0"
-                         class="csc-checkbox sm" [style.border-color]="ci.boxBorder" [style.background]="ci.boxBg"
+                         [attr.aria-checked]="ci.visible" [attr.aria-label]="ci.showLabel" tabindex="0"
+                         [attr.aria-description]="ci.featureNote || null"
+                         class="csc-checkbox sm"
+                         [style.border-color]="ci.boxBorder" [style.background]="ci.boxBg"
                          (click)="toggleColumn(ci.field)"
                          (keydown.enter)="toggleColumn(ci.field)"
                          (keydown.space)="toggleColumn(ci.field); $event.preventDefault()">
@@ -1105,7 +1211,7 @@
                     @if (ci.hasPos) {
                       <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
                              role="spinbutton"
-                             [attr.aria-labelledby]="ci.labelId"
+                             [attr.aria-label]="ci.orderLabel"
                              [attr.aria-valuenow]="ci.pos"
                              [attr.aria-valuemin]="ci.posMin" [attr.aria-valuemax]="ci.posMax"
                              [attr.aria-valuetext]="ci.posLabel"
@@ -1118,8 +1224,12 @@
                     }
                   </td>
                   <td class="csc-cc-pin">
+                    <!-- aria-label, not aria-labelledby: the old list named the
+                         select with its OWN id, and a <select> referenced that
+                         way computes its name from its option text - so it
+                         announced "Document NoneLeftRight". -->
                     <select class="csc-pin-select" [id]="ci.pinId"
-                            [attr.aria-labelledby]="ci.labelId + ' ' + ci.pinId"
+                            [attr.aria-label]="ci.pinLabel"
                             [value]="ci.pin"
                             (change)="setColumnPin(ci.field, $any($event.target).value)">
                       <option value="">None</option>
@@ -1151,7 +1261,9 @@
             </span>
             <div role="checkbox" [id]="'chooser-chk-' + ci.field"
                  [attr.aria-checked]="ci.visible" [attr.aria-label]="ci.label" tabindex="0"
-                 class="csc-checkbox sm" [style.border-color]="ci.boxBorder" [style.background]="ci.boxBg"
+                 [attr.aria-description]="ci.featureNote || null"
+                 class="csc-checkbox sm"
+                 [style.border-color]="ci.boxBorder" [style.background]="ci.boxBg"
                  (click)="toggleColumn(ci.field)"
                  (keydown.enter)="toggleColumn(ci.field)"
                  (keydown.space)="toggleColumn(ci.field); $event.preventDefault()">
@@ -1161,7 +1273,7 @@
             @if (ci.hasPos) {
               <input [id]="ci.posFieldId" type="text" inputmode="numeric" class="csc-pos-input"
                      role="spinbutton"
-                     [attr.aria-labelledby]="ci.labelId"
+                     [attr.aria-label]="ci.orderLabel"
                      [attr.aria-valuenow]="ci.pos"
                      [attr.aria-valuemin]="ci.posMin" [attr.aria-valuemax]="ci.posMax"
                      [attr.aria-valuetext]="ci.posLabel"
@@ -1243,10 +1355,17 @@
          (keydown)="trapTabKey($event, 'delete-dialog')">
       <div class="csc-modal-body-pad">
         <span id="delete-title" role="heading" aria-level="2" class="csc-modal-title">
-          {{ bulkDeleteOpen() ? 'Delete selected records?' : 'Delete record?' }}
+          @if (bulkDeleteOpen() && deleteAllMode()) { Delete all records? }
+          @else if (bulkDeleteOpen())               { Delete selected records? }
+          @else                                     { Delete record? }
         </span>
         <p id="delete-desc" class="csc-delete-desc">
-          @if (bulkDeleteOpen()) {
+          @if (bulkDeleteOpen() && deleteAllMode()) {
+            <!-- Says "matching", not "visible": this covers every page of the
+                 current filter, not the rows on screen. -->
+            This will permanently remove all {{ deleteAllCount().toLocaleString() }} record{{ deleteAllCount() === 1 ? '' : 's' }}
+            matching the current filters, across every page. This action cannot be undone.
+          } @else if (bulkDeleteOpen()) {
             This will permanently remove {{ selCount() }} selected record{{ selCount() === 1 ? '' : 's' }}. This action cannot be undone.
           } @else {
             This will permanently remove {{ deleteRow()?.entity }}. This action cannot be undone.

@@ -1,6 +1,6 @@
 import {
   Component, OnInit, OnDestroy, AfterViewInit, AfterViewChecked, ChangeDetectionStrategy,
-  signal, computed, DestroyRef, inject, Input, ChangeDetectorRef, ElementRef,
+  signal, computed, effect, untracked, DestroyRef, inject, Input, ChangeDetectorRef, ElementRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { A11yAnnounceService } from './services/a11y-announce.service';
@@ -41,8 +41,35 @@ const DEFAULT_COLS: GridColumnDef[] = [
   { field: 'country', label: 'Country', editor: 'combo' },
   { field: 'date',    label: 'Date' },
 ];
-// Action column ids — these can NEVER become rowheader
-const ACTION_COL_IDS = new Set(['lead', 'edit-col', 'delete-col']);
+/**
+ * The grid's own controls, which are now real columns: they take part in
+ * ordering, pinning and the Choose Columns dialog exactly like data columns.
+ *
+ * They stay OUT of colDefs() because that is the host's public `columnDefs`
+ * input - the host describes its data, not the grid's furniture. Everything
+ * that needs "all columns" reads allColDefs() instead.
+ */
+type ActionKind = 'expand' | 'lead' | 'delete';
+const ACTION_COLS: { field: string; label: string; kind: ActionKind }[] = [
+  { field: 'expand-col', label: 'Expand', kind: 'expand' },
+  { field: 'lead',       label: 'Select', kind: 'lead'   },
+  { field: 'delete-col', label: 'Delete', kind: 'delete' },
+];
+const ACTION_FIELDS = ACTION_COLS.map(c => c.field);
+/** Action columns can NEVER become rowheader - they carry no data meaning. */
+const ACTION_COL_IDS = new Set(ACTION_FIELDS);
+/**
+ * Nothing is locked. Unchecking an action column in Choose Columns is not a
+ * visibility toggle - it switches the whole FEATURE off. Select off means no
+ * checkboxes, no Space-to-select and no selection bar; Delete off means no
+ * delete buttons and a dead Delete key; Expand off means no chevrons and every
+ * open row collapses. See the has*Feature computeds on the component.
+ */
+/** Action columns are frozen left out of the box: they are controls FOR a row,
+ *  and a control that scrolls away from its row is useless. */
+function defaultPins(): Record<string, 'left' | 'right'> {
+  return Object.fromEntries(ACTION_FIELDS.map(f => [f, 'left' as const]));
+}
 
 // ─── Section-isolated state ───────────────────────────────────────────────────
 interface SectionState {
@@ -59,8 +86,8 @@ interface SectionState {
 function defaultSectionState(order?: string[]): SectionState {
   return {
     sortField: null, sortDir: null,
-    filters: {}, pinnedCols: {},
-    colOrder: order ? [...order] : DEFAULT_COLS.map(c => c.field),
+    filters: {}, pinnedCols: defaultPins(),
+    colOrder: [...ACTION_FIELDS, ...(order ?? DEFAULT_COLS.map(c => c.field))],
     colHidden: {},
   };
 }
@@ -119,7 +146,8 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       const next = { ...all } as typeof all;
       (Object.keys(next) as (keyof typeof next)[]).forEach(s => {
         if (s === 'all') return; // All Features owns its own column set
-        next[s] = { ...next[s], colOrder: [...order], colHidden: {}, filters: {}, pinnedCols: {}, sortField: null, sortDir: null };
+        next[s] = { ...next[s], colOrder: [...ACTION_FIELDS, ...order], colHidden: {}, filters: {},
+                    pinnedCols: defaultPins(), sortField: null, sortDir: null };
       });
       return next;
     });
@@ -322,12 +350,8 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   protected _isDragging = false;
   private _toastTimer: any;
   /** Keyboard-navigable columns for the current section (computed, no effect needed). */
-  navCols = computed(() => {
-    // Must match gridCols()' track order: expand, lead, delete, then data.
-    const head = this.canExpand() ? ['expand-col', 'lead'] : ['lead'];
-    const rest = this.canDelete() ? ['delete-col'] : [];
-    return [...head, ...rest, ...this.visibleFields()];
-  });
+  /** Action columns live in visibleFields() now, so this IS the track order. */
+  navCols = computed(() => this.visibleFields());
   _navRowIds: string[] = ['header'];
   // filter popup roving tabindex
   filterFocusIdx = signal(-1);
@@ -378,7 +402,53 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   accent = computed(() => this.accentColorProp === 'Navy' ? '#003B5C' : '#008996');
   rowH   = computed(() => this.densityProp === 'Compact' ? 34 : 42);
 
-  orderedFields = computed(() => this.colOrder().filter(f => this.colDefs().some(c => c.field === f)));
+  /** The action columns this section actually renders. Expand and Delete only
+   *  exist where the section supports them; Select is always there. */
+  actionCols = computed(() => ACTION_COLS.filter(c =>
+    c.kind === 'expand' ? this.canExpand() : c.kind === 'delete' ? this.canDelete() : true));
+
+  /** Every column the section can show - action columns first, then the host's
+   *  data columns. This, not colDefs(), is what ordering and the chooser use. */
+  allColDefs = computed(() => [
+    ...this.actionCols().map(c => ({ field: c.field, label: c.label })),
+    ...this.colDefs().map(c => ({ field: c.field, label: c.label })),
+  ]);
+
+  private actionKindOf(field: string): ActionKind | null {
+    return ACTION_COLS.find(c => c.field === field)?.kind ?? null;
+  }
+
+  /**
+   * Is the feature switched on? Two conditions: the section has to offer it at
+   * all, and the user must not have unchecked its column in Choose Columns.
+   * Unchecking is a feature switch, so every route into the feature - the
+   * buttons, the keyboard shortcuts, the selection bar - is gated on these,
+   * not just the column's markup.
+   */
+  hasSelectFeature = computed(() => !this.colHidden()['lead']);
+  hasDeleteFeature = computed(() => this.canDelete() && !this.colHidden()['delete-col']);
+  hasExpandFeature = computed(() => this.canExpand() && !this.colHidden()['expand-col']);
+
+  /** The header's delete button never disappears and is never disabled - it
+   *  just means different things. With nothing selected it deletes everything
+   *  that matches the current filters, across every page; with a selection it
+   *  deletes exactly that. Keyed off the SELECTION, not off whether the Select
+   *  column is switched on: an option that vanishes is more confusing than one
+   *  whose label changes. */
+  deleteAllMode = computed(() => !this.hasSelection());
+  deleteAllCount = computed(() =>
+    this.isServerMode() ? this.ds.total() : this.baseRows().length);
+
+  orderedFields = computed(() => {
+    const known = new Set(this.allColDefs().map(c => c.field));
+    const order = this.colOrder().filter(f => known.has(f));
+    // Action columns are the component's own, so a stored order that predates
+    // them - or one rebuilt from a host columnDefs list, which never mentions
+    // them - would drop them entirely. Any that are missing lead the list in
+    // their canonical order rather than vanishing from the grid.
+    const missing = this.actionCols().map(c => c.field).filter(f => !order.includes(f));
+    return [...missing, ...order];
+  });
 
   /** Which frozen block a column lives in. Every reorder is confined to one of
    *  these: crossing a boundary would silently change the column's pin state,
@@ -462,22 +532,22 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    */
   leadWidths = signal<Record<string, number>>({});
 
-  gridCols = computed(() => {
-    const ie = this.canDelete(), ix = this.canExpand();
+  /** Track width for one column, whichever kind it is. Action columns keep
+   *  their own measured widths (leadWidths) because they are sized from icon
+   *  content, not text; the fallbacks apply only before the first measure. */
+  private trackFor(field: string): string {
     const lw = this.leadWidths();
-    // Fallbacks apply only before the first measurement pass has run.
-    const leadW = lw['lead'] ?? ((ie || ix) ? 48 : 72);
-    const delColW  = ie ? (lw['delete-col'] ?? 52) : 0;
-    const expandColW = ix ? (lw['expand-col'] ?? 52) : 0;
-    const vis = this.visibleFields();
-    const w = this._colWidths;
-    const dataCols = vis.map(f => w[f] ? w[f] + 'px' : 'minmax(100px,1fr)').join(' ');
-    const lead: string[] = [];
-    if (ix) lead.push(`${expandColW}px`);
-    lead.push(`${leadW}px`);
-    if (ie) lead.push(`${delColW}px`);
-    return `${lead.join(' ')} ${dataCols}`;
-  });
+    if (field === 'lead') {
+      return (lw['lead'] ?? (this.actionCols().length > 1 ? 48 : 72)) + 'px';
+    }
+    if (this.actionKindOf(field)) return (lw[field] ?? 52) + 'px';
+    const w = this._colWidths[field];
+    return w ? w + 'px' : 'minmax(100px,1fr)';
+  }
+
+  /** Tracks follow visibleFields() exactly, so an action column that has been
+   *  reordered or pinned right lands where the user put it. */
+  gridCols = computed(() => this.visibleFields().map(f => this.trackFor(f)).join(' '));
 
   /**
    * Pinning = FREEZING. A left-pinned column stops scrolling horizontally and
@@ -495,11 +565,8 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    * each frozen group is contiguous - the left group runs from the very start
    * of the row and the right group runs to the very end.
    *
-   * The leading action columns (checkbox / expand / delete) are frozen too, but
-   * ONLY when something is pinned left: otherwise a pinned column would park at
-   * left:0 and the checkbox column would scroll away underneath it, which looks
-   * broken. When nothing is pinned left they stay ordinary scrolling columns,
-   * exactly as before.
+   * Action columns need no special case here any more: they are ordinary
+   * members of visibleFields() with their own pin state, left-pinned by default.
    *
    * A column whose width has not been measured yet has no known offset. Rather
    * than guess (a wrong offset shows as a visible gap or overlap), freezing
@@ -513,20 +580,14 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const anyRight = vis.some(f => pinned[f] === 'right');
     if (!anyLeft && !anyRight) return { left, right, lastLeft: null as string | null, firstRight: null as string | null };
 
-    const ie = this.canDelete(), ix = this.canExpand();
     const lw = this.leadWidths(), w = this._colWidths;
-    const leadW = lw['lead'] ?? ((ie || ix) ? 48 : 72);
     const widthOf = (key: string): number | null => {
-      if (key === 'lead') return leadW;
-      if (key === 'delete-col') return lw['delete-col'] ?? 52;
-      if (key === 'expand-col') return lw['expand-col'] ?? 52;
+      if (key === 'lead') return lw['lead'] ?? (this.actionCols().length > 1 ? 48 : 72);
+      if (this.actionKindOf(key)) return lw[key] ?? 52;
       return w[key] ?? null; // unmeasured data column
     };
 
-    // Freeze order from the left: leading action columns (only if something is
-    // pinned left), then the left-pinned data columns in visual order.
-    const leadKeys = [...(ix ? ['expand-col'] : []), 'lead', ...(ie ? ['delete-col'] : [])];
-    const leftKeys = [...(anyLeft ? leadKeys : []), ...vis.filter(f => pinned[f] === 'left')];
+    const leftKeys = vis.filter(f => pinned[f] === 'left');
     let acc = 0, lastLeft: string | null = null;
     for (const k of leftKeys) {
       const cw = widthOf(k);
@@ -596,6 +657,31 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const pinned = this.pinnedCols(), filters = this.filters();
     const rhf = this.rowHeaderField();
     return visFields.map((field, fi) => {
+      // Action columns render their own control instead of a sortable header,
+      // so they only need identity, geometry and pin state. The template
+      // switches on `kind` and ignores the rest.
+      const kind = this.actionKindOf(field);
+      if (kind) {
+        const isActive = ark === 'header' && ack === field;
+        // Pin state belongs here for the same reason it does on a data header:
+        // the badge is gone and the frozen boundary is drawn as a separator,
+        // which no screen reader can report. Without this an action column was
+        // the one pinned thing in the grid that never said so.
+        const pinNote = pinned[field] ? ', pinned ' + pinned[field] : '';
+        return {
+          kind, field, label: this.colLabel(field),
+          ariaColIndex: String(fi + 1), cellId: 'gc-header-' + field,
+          tabIndex: isActive ? '0' : '-1',
+          isAsc: false, isDesc: false, noSort: true, ariaSort: 'none',
+          sortLevel: null, sortTitle: '',
+          headerAriaLabel: this.colLabel(field) + ' actions' + pinNote, headerAriaDesc: '',
+          sortBg: 'transparent', sortBorder: 'none', filterBg: 'transparent', filterBorder: 'none',
+          showMenu: false, resizable: false, showEditableIcon: false,
+          draggable: false, dragOpacity: 1, dropShadow: 'none',
+          isRowHeader: false, isResizing: false,
+          resizerAriaLabel: '', resizerAriaValueNow: '', resizerAriaMin: '', resizerAriaMax: '',
+        } satisfies ColumnView;
+      }
       const c = this.colDefs().find(x => x.field === field)!;
       // In server mode the sort is a list, so a column can be sorted at level 2
       // even though it is not the primary key.
@@ -624,11 +710,15 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       const editableNote = (this.canEdit() && this.isFieldEditable(field)) ? ' Editable column.' : '';
       const headerAriaDesc = `Press Enter to sort${this.isServerMode() ? ', or Shift+Enter to add this column to the sort' : ''}. Press Ctrl+Enter to open filter${resizable ? '. Press Shift+R to enter resize mode' : ''}${this.canMenu() ? '. Press Shift+M to open column menu' : ''}.${editableNote}`;
       return {
+        kind: 'data' as const,
         field, label: c.label, isAsc, isDesc, noSort: !sActive,
         sortLevel,
         sortTitle: this.isServerMode() ? 'Sort (Shift+click to add to sort)' : 'Sort',
         ariaSort: isAsc ? 'ascending' : isDesc ? 'descending' : 'none',
-        ariaColIndex: String(fi + 2), cellId: 'gc-header-' + field,
+        // Action columns are part of the grid geometry now, so a data column's
+        // index is simply its place in the visible list - no fixed +1 for a
+        // lead cell that may not even be first any more.
+        ariaColIndex: String(fi + 1), cellId: 'gc-header-' + field,
         tabIndex: isActiveCell ? '0' : '-1',
         headerAriaLabel, headerAriaDesc,
         sortBg: sActive ? tint : 'transparent', sortBorder: sActive ? '1px solid ' + a : '1px solid transparent',
@@ -761,6 +851,20 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       const isExpanded = this.canExpand() && !!exp[r.id];
       const isLeadActive = ark === r.id && ack === 'lead';
       const cells: CellView[] = visFields.map((field, ci) => {
+        // Action cells carry only identity, geometry and focus state; the
+        // template switches on `kind` and renders the control itself. Their ids
+        // stay the ones the focus and keyboard code already uses.
+        const kind = this.actionKindOf(field);
+        if (kind) {
+          const isActive = ark === r.id && ack === field;
+          return {
+            kind, field, value: '', isLink: false, isEditing: false, isText: false,
+            ariaColIndex: String(ci + 1), cellId: 'gc-' + r.id + '-' + field,
+            tabIndex: isActive ? '0' : '-1',
+            draft: '', isRowHeader: false, editable: false, ariaReadonly: null,
+            isCombo: false, dirty: false, cellAriaDesc: null,
+          } satisfies CellView;
+        }
         const isLink = field === 'doc';
         const editable = this.canEdit() && this.isFieldEditable(field);
         // Cell-level edit mode: only THIS cell is in edit mode, not the row.
@@ -770,8 +874,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
         const isCombo = editable && comboSet.has(field);
         const value = String((r as any)[field] ?? '');
         return {
+          kind: 'data' as const,
           field, value, isLink, isEditing: cellEditing, isText: !isLink && !cellEditing,
-          ariaColIndex: String(ci + 2), cellId: 'gc-' + r.id + '-' + field,
+          ariaColIndex: String(ci + 1), cellId: 'gc-' + r.id + '-' + field,
           tabIndex: isCellActive ? '0' : '-1',
           draft: cellEditing ? edDraft : value,
           isRowHeader: field === rhf,
@@ -899,7 +1004,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   selectionNote   = computed(() => this.hasActiveFilter() ? 'Reflects rows currently visible' : 'Across all rows');
   ariaRowCount = computed(() => String(this.sliceInfo().total + 1));
   ariaColCount = computed(() => String(this.visibleFields().length + 1));
-  gridLabel    = computed(() => this.sectionMeta().title + ' data grid');
+  /** The corner pencil badge is decorative, so "editable" has to reach a screen
+   *  reader from the grid's own name instead of from an icon it cannot see. */
+  gridLabel    = computed(() => this.sectionMeta().title + ' data grid'
+    + (this.canEdit() ? ', inline editing enabled' : ''));
   rangeText    = computed(() => {
     const { start, end, total } = this.sliceInfo();
     if (this.isServerMode()) {
@@ -1068,13 +1176,13 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
         sepBefore: i > 0 && (pinned[shown[i - 1]] ?? '') !== (pinned[field] ?? ''),
         pin: pinned[field] ?? '',
         pinId: 'chooser-pin-' + field,
-        dragId: 'chooser-drag-' + field,
-        dragLabel: !visible
-          ? 'Reordering unavailable while ' + label + ' is hidden'
-          : cq
-            ? 'Reordering unavailable while searching'
-            : 'Reorder ' + label + ', position ' + pos + ' of ' + vis.length
-              + '. Press the up or down arrow key to move it.',
+        // Unchecking an action column turns its whole feature off, so the
+        // checkbox needs to say so rather than reading as "hide a column".
+        featureNote: this.actionKindOf(field)
+          ? 'Switches the ' + label.toLowerCase() + ' feature off for this grid' : '',
+        showLabel: 'Show ' + label,
+        orderLabel: label + ' order',
+        pinLabel: label + ' pin',
       };
     });
   });
@@ -1200,6 +1308,34 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   atLastPage  = computed(() => this.sliceInfo().page >= this.sliceInfo().pageCount - 1);
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+  /**
+   * Child records load when an expanded row is RENDERED, not when it is opened.
+   *
+   * Expanding and fetching are separate concerns: Expand All marks the whole
+   * filtered set open, and this brings each row's children in as the virtual
+   * window reaches it. Attaching the fetch to the open event instead is what
+   * forced Expand All to stop at the current page - and it also meant a row
+   * expanded by any other route would have sat on "Loading…" with nothing to
+   * finish it.
+   *
+   * The fetch is deferred out of the effect body because loadChildren writes a
+   * signal of its own on entry, which must not happen while this effect runs.
+   */
+  private readonly loadVisibleChildren = effect(() => {
+    if (!this.isServerMode()) return;
+    const exp = this.expanded();
+    const rendered = this.viewRows();
+    const want = rendered
+      .filter(r => exp[r.id])
+      .map(r => r.id)
+      .filter(id => untracked(() => this.ds.childrenFor(id)) === undefined);
+    if (!want.length) return;
+    queueMicrotask(() => want.forEach(id => void this.ds.loadChildren(id).then(() => {
+      this.cdr.markForCheck();
+      if (this.virtualOn()) setTimeout(() => this.measurePanel(id));
+    })));
+  });
+
   ngOnInit(): void { void this.loadClientDataset(); }
 
   /**
@@ -1240,8 +1376,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
           return;
         }
       }
-      // Delete key — delete selected rows in editable section
-      if (e.key === 'Delete' && this.canDelete() && !this.editingCount()) {
+      // Delete key — delete selected rows. Gated on the FEATURE, not just the
+      // section: with the Delete column unchecked the key must be dead too,
+      // and it stays selection-based, so it never triggers Delete all.
+      if (e.key === 'Delete' && this.hasDeleteFeature() && !this.editingCount()) {
         // Delete is an ordinary text-editing key inside a field; without this
         // guard, clearing a character in the search or add-record inputs
         // opened a destructive confirmation dialog.
@@ -1419,7 +1557,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   // ── Column ops ────────────────────────────────────────────────────────────
-  colLabel(field: string): string { return this.colDefs().find(c => c.field === field)?.label ?? field; }
+  colLabel(field: string): string { return this.allColDefs().find(c => c.field === field)?.label ?? field; }
 
   openMenu(field: string, anchorEl: HTMLElement): void {
     this.saveFocus();
@@ -1671,16 +1809,14 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   /** Chooser pin dropdown. '' is the select's value for "not pinned". */
   setColumnPin(field: string, dir: string): void {
     this.setPinDirection(field, (dir || 'none') as 'left' | 'right' | 'none');
-  }
-
-  /** Arrow keys on the chooser drag handle, so reordering never requires a
-   *  mouse drag (WCAG 2.5.7). */
-  onChooserDragKey(e: KeyboardEvent, field: string): void {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-    if (this.chooserSearch()) return; // order is ambiguous against a filtered list
-    e.preventDefault();
-    this.moveColumn(field, e.key === 'ArrowUp' ? -1 : 1, true);
-    this.focusAfterRender('chooser-drag-' + field);
+    // Pinning moves the row into another section of the list, and moving a DOM
+    // node blurs whatever was inside it - here the select the user just
+    // operated, which dropped a keyboard user onto <body>. Restored by column
+    // id, because the row index is exactly what changed.
+    // Deliberately here and not in setPinDirection: the column menu pins too,
+    // and there focus belongs on the menu radio that repositionMenuAfterRender
+    // re-asserts.
+    this.focusAfterRender('chooser-pin-' + field);
   }
 
   /**
@@ -1721,13 +1857,6 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     });
   }
 
-  /**
-   * @param field  column to move
-   * @param dir    -1 = up/left, +1 = down/right
-   * @param fromChooser  when true, keep focus on the chooser button that was
-   *        pressed (previously only "down" happened to retain focus; "up" lost
-   *        it because the re-render replaced the focused element).
-   */
   /**
    * The visible neighbour a column would swap with when moved, or null when
    * the move cannot produce any visible change.
@@ -1799,18 +1928,15 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     return this.moveTargetField(field, dir) !== null;
   }
 
-  /** Move Left/Right from the column menu, and Up/Down from the chooser's drag
-   *  handle. Both are the same operation on the visible list - the chooser used
-   *  to swap raw storage indices instead, which is why a pinned column reported
-   *  a new position while standing still. */
-  moveColumn(field: string, dir: number, fromChooser = false): void {
-    const dirWord = fromChooser ? (dir < 0 ? 'up' : 'down') : (dir < 0 ? 'left' : 'right');
-    const refocus = () => { if (fromChooser) this.focusAfterRender('chooser-drag-' + field); };
+  /** Move Left/Right, from the column menu or Ctrl+Arrow on a header. Works on
+   *  the visible list, so a pinned column can never report a new position while
+   *  standing still. */
+  moveColumn(field: string, dir: number): void {
+    const dirWord = dir < 0 ? 'left' : 'right';
     const target = this.moveTargetField(field, dir);
     if (!target) {
       this.announceService.announce(
         this.colLabel(field) + ' cannot move ' + dirWord + ' any further');
-      refocus();
       return;
     }
     const order = this.withSectionResequenced(field, seq => {
@@ -1820,11 +1946,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       return s;
     });
     const vPos = this.applyOrderIfVisiblyChanged(field, order);
-    if (vPos === null) { refocus(); return; }
-    const msg = this.colLabel(field) + ' moved ' + dirWord
-      + ', position ' + vPos + ' of ' + this.visibleFields().length;
-    if (fromChooser) this.announceService.announce(msg); else this.showToast(msg);
-    refocus();
+    if (vPos === null) return;
+    this.showToast(this.colLabel(field) + ' moved ' + dirWord
+      + ', position ' + vPos + ' of ' + this.visibleFields().length);
   }
 
   /** Drag-and-drop reorder, shared by the header row and the chooser list. */
@@ -2160,7 +2284,11 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   resetColumns(): void {
-    this.patchSS(defaultSectionState());
+    // Seeded from THIS section's own columns. defaultSectionState() with no
+    // argument falls back to the built-in eight, which are not the column set
+    // in All Features or in a host that supplied its own columnDefs - resetting
+    // to them left the grid with no data columns at all.
+    this.patchSS(defaultSectionState(this.colDefs().map(c => c.field)));
     this.setColWidths(this.section(), {});
     this.menuField.set(null);
     // Reset now means "measure everything again" rather than "restore a
@@ -2173,10 +2301,24 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   // ── Column resize (mouse) ─────────────────────────────────────────────────
+  /** x of the full-height guide while a column is being dragged, measured from
+   *  .csc-grid-inner's left edge. null when no drag is in progress. */
+  resizeGuideX = signal<number | null>(null);
+
+  private updateResizeGuide(field: string): void {
+    const inner = this.hostEl.nativeElement.querySelector('.csc-grid-inner');
+    const cell = document.getElementById('gc-header-' + field);
+    if (!inner || !cell) { this.resizeGuideX.set(null); return; }
+    // Right edge of the column being dragged, in .csc-grid-inner coordinates,
+    // so the guide stays put while the scroll container moves under it.
+    this.resizeGuideX.set(cell.getBoundingClientRect().right - inner.getBoundingClientRect().left);
+  }
+
   startResize(field: string, e: MouseEvent): void {
     e.preventDefault(); e.stopPropagation();
     const startX = e.clientX, w0 = this._colWidths[field] || this.measureColumnWidth(field) || 120;
     const s = this.section();
+    this.updateResizeGuide(field);
     const onMove = (ev: MouseEvent) => {
       const nw = Math.max(60, w0 + (ev.clientX - startX));
       this.patchColWidth(s, field, nw);
@@ -2184,11 +2326,14 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       // Mouse events fire outside Angular's zone; OnPush won't see the signal write
       // in the same tick unless we synchronously flush change detection.
       this.cdr.detectChanges();
+      this.updateResizeGuide(field);
+      this.cdr.detectChanges();
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.body.style.userSelect = '';
+      this.resizeGuideX.set(null);
       this.cdr.detectChanges();
     };
     document.body.style.userSelect = 'none';
@@ -2197,14 +2342,20 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   // ── Column resize (keyboard) ──────────────────────────────────────────────
+  /** Keyboard resize gets the same full-height guide the mouse drag draws.
+   *  Without it the only sign resize mode was active was an outline on the
+   *  header cell - the boundary the user is actually moving looked no different
+   *  from any other, so there was nothing to aim at while pressing arrows. */
   enterResizeMode(field: string): void {
     this.resizeModeField.set(field);
+    this.updateResizeGuide(field);
     this.announceService.announce(`Resize mode active for ${this.colLabel(field)} column. Use arrow keys to resize, Escape to exit.`);
   }
 
   exitResizeMode(): void {
     const f = this.resizeModeField();
     this.resizeModeField.set(null);
+    this.resizeGuideX.set(null);
     if (f) this.announceService.announce('Resize mode exited. ' + this.colLabel(f) + ' column width: ' + (this._colWidths[f] ?? 'auto') + 'px');
   }
 
@@ -2215,6 +2366,12 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const cur = this._colWidths[field] || this.measureColumnWidth(field) || 120;
     if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); this.patchColWidth(s, field, cur + step); this.clearAutoFit(s, field); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); this.patchColWidth(s, field, Math.max(60, cur - step)); this.clearAutoFit(s, field); }
+    else return;
+    // The track only takes its new width once change detection has run, so the
+    // guide is re-measured in a later task. setTimeout, not rAF: rAF does not
+    // fire while the tab is hidden or throttled, which would leave the guide
+    // stranded at the old boundary while the column kept moving.
+    setTimeout(() => { this.updateResizeGuide(field); this.cdr.markForCheck(); });
   }
 
   // ── Column drag (header) ──────────────────────────────────────────────────
@@ -2237,7 +2394,11 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
   closeChooser(): void {
     this.chooserOpen.set(false); this.cDragField.set(null); this.cDropTarget.set(null);
-    this.announceService.announce('Choose columns dialog closed'); this.restoreFocus();
+    this.announceService.announce('Choose columns dialog closed');
+    // Not plain restoreFocus(): this dialog can delete the very cell the user
+    // opened it from. restoreFocus() stays as-is for the menu and filter
+    // popovers, which never remove their trigger.
+    this.restoreFocusToGrid();
   }
   toggleColumn(field: string): void {
     const wasHidden = !!this.colHidden()[field];
@@ -2247,7 +2408,11 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (!h[field]) h[field] = true; else delete h[field];
     this.patchSS({ colHidden: h });
     this.ensureActiveCellValid(); // hiding the active column would strand the tab stop
-    this.announceService.announce(this.colLabel(field) + (h[field] ? ' hidden' : ' shown'));
+    if (h[field]) this.retireFeatureState(field);
+    const kind = this.actionKindOf(field);
+    this.announceService.announce(kind
+      ? this.colLabel(field) + (h[field] ? ' feature switched off' : ' feature switched on')
+      : this.colLabel(field) + (h[field] ? ' hidden' : ' shown'));
     // A column that was hidden was never measured; measure it now that it is
     // rendered, instead of leaving it on a stale width.
     if (wasHidden && !h[field]) {
@@ -2258,6 +2423,22 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       });
     }
   }
+  /** Switching a feature off has to drop the state it owned, or that state
+   *  survives with nothing left on screen to reach it: a selection nobody can
+   *  see or clear, and detail panels stuck open with no chevron to close them. */
+  private retireFeatureState(field: string): void {
+    if (field === 'lead') {
+      this.setSelected({});
+      this.selectingAll.set(false);
+      // A confirm opened from the selection has nothing left to act on.
+      if (this.bulkDeleteOpen()) this.closeDeleteConfirm();
+    }
+    if (field === 'expand-col') this.expanded.set({});
+    if (field === 'delete-col' && (this.bulkDeleteOpen() || this.deleteId() != null)) {
+      this.closeDeleteConfirm();
+    }
+  }
+
   /** True when every column currently listed in the chooser is visible. */
   chooserAllVisible = computed(() => {
     const items = this.chooserItems();
@@ -2273,9 +2454,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (!items.length) return;
     if (this.chooserAllVisible()) {
       const hidden = { ...this.colHidden() };
-      items.forEach(i => { hidden[i.field] = true; }); // every one, no exceptions
+      items.forEach(i => { hidden[i.field] = true; }); // every one, action columns included
       this.patchSS({ colHidden: hidden });
       this.ensureActiveCellValid();
+      items.forEach(i => this.retireFeatureState(i.field));
       this.announceService.announce('All ' + items.length + ' columns hidden');
     } else {
       const hidden = { ...this.colHidden() };
@@ -2287,7 +2469,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
   /** Count label shown opposite Select all; narrows while a search is active. */
   chooserCountLabel = computed(() => {
-    const shown = this.chooserItems().length, all = this.colDefs().length;
+    // allColDefs, not colDefs: the list now includes the action columns, so
+    // counting only data columns read as "10 of 8".
+    const shown = this.chooserItems().length, all = this.allColDefs().length;
     return shown === all ? `${all} columns` : `${shown} of ${all} columns`;
   });
 
@@ -2297,9 +2481,15 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   chooserShowAll(): void { this.patchSS({ colHidden: {} }); }
   chooserHideAll(): void {
     const h: Record<string,boolean> = {};
-    this.orderedFields().slice(1).forEach(f => { h[f] = true; });
+    const fields = this.orderedFields();
+    // Keep the first DATA column. Slicing blindly at index 1 would now leave an
+    // action column as the sole survivor and hide every data column instead.
+    const firstData = fields.find(f => !ACTION_COL_IDS.has(f));
+    fields.forEach(f => { if (f !== firstData) h[f] = true; });
     this.patchSS({ colHidden: h });
-    this.ensureActiveCellValid(); this.showToast('Showing 1 of ' + this.orderedFields().length + ' columns');
+    this.ensureActiveCellValid();
+    fields.forEach(f => { if (h[f]) this.retireFeatureState(f); });
+    this.showToast('Showing ' + this.visibleFields().length + ' of ' + fields.length + ' columns');
   }
   onCDragStart(field: string): void { this.cDragField.set(field); }
   onCDragOver(field: string, e: DragEvent): void { e.preventDefault(); if (this.cDropTarget() !== field) this.cDropTarget.set(field); }
@@ -2499,9 +2689,49 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (rk !== 'header' && !this.sliceInfo().slice.some(r => r.id === rk)) {
       this.activeRowKey.set('header');
     }
-    if (!this.navCols().includes(this.activeColKey())) {
-      this.activeColKey.set('lead');
+    const cols = this.navCols();
+    if (!cols.includes(this.activeColKey())) {
+      // NOT a hardcoded 'lead' any more: lead is the Select column, and that can
+      // be switched off from Choose columns. Falling back to it left the grid
+      // with no tabbable cell at all - the exact state this guard exists to
+      // prevent. The nearest surviving column also keeps the user roughly where
+      // they were rather than throwing them to column one.
+      this.activeColKey.set(this.nearestVisibleCol(this.activeColKey()) ?? cols[0] ?? 'lead');
     }
+  }
+
+  /** The visible column closest to one that has just gone: to the right first,
+   *  then to the left. Searched in chooserOrder(), which still lists hidden
+   *  columns, so the vanished column's place is still known. */
+  private nearestVisibleCol(gone: string): string | null {
+    const all = this.chooserOrder(), vis = new Set(this.navCols());
+    const i = all.indexOf(gone);
+    if (i < 0) return null;
+    for (let j = i + 1; j < all.length; j++) if (vis.has(all[j])) return all[j];
+    for (let j = i - 1; j >= 0; j--) if (vis.has(all[j])) return all[j];
+    return null;
+  }
+
+  /**
+   * Puts DOM focus back in the grid after a dialog that may have deleted the
+   * element the user came from.
+   *
+   * restoreFocus() alone is not enough: it only restores when the saved element
+   * is still in the document, and hiding its column removes it - so focus was
+   * left on <body> and a keyboard user had to tab in from the top of the page.
+   * ensureActiveCellValid() had already fixed the roving tabindex, so the cell
+   * to land on is known; nothing was moving focus to it.
+   */
+  private restoreFocusToGrid(): void {
+    if (this._lastFocused && document.contains(this._lastFocused)) { this.restoreFocus(); return; }
+    this._lastFocused = null;
+    // Every column hidden: the grid is display:none behind the empty state, so
+    // neither a cell nor the grid root can take focus. The empty state's own
+    // button is the only way back, and the only thing left to land on.
+    if (this.noColumnsVisible()) { this.focusAfterRender('csc-empty-chooser-btn'); return; }
+    const rk = this.activeRowKey(), ck = this.activeColKey();
+    const cellId = rk === 'header' ? 'gc-header-' + ck : 'gc-' + rk + '-' + ck;
+    this.focusAfterRender(document.getElementById(cellId) ? cellId : 'csc-grid-root');
   }
 
   setPage(p: number): void {
@@ -2855,12 +3085,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (e[id]) delete e[id]; else e[id] = true;
     this.expanded.set(e);
     const row = this.rowById(id);
-    // Child records are fetched the first time a row is opened, not up front.
-    if (will && this.isServerMode()) void this.ds.loadChildren(id).then(() => {
-      this.cdr.markForCheck();
-      // The panel grows when the children land, so measure again after.
-      if (this.virtualOn()) setTimeout(() => this.measurePanel(id));
-    });
+    // No fetch here on purpose: loadVisibleChildren owns that, keyed off the row
+    // being rendered. Kicking one off here too would race it into a double fetch,
+    // since loadChildren only short-circuits once a result is already in.
     if (will && this.virtualOn()) setTimeout(() => this.measurePanel(id));
     this.announceService.announce((will ? 'Expanded details for ' : 'Collapsed details for ') + (row?.entity ?? id));
   }
@@ -2871,18 +3098,26 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     return rows.length > 0 && rows.every(r => e[r.id]);
   });
 
-  /** Header expand-all toggle — mirrors selectAll(): all expanded → collapse all, else expand all. */
+  /**
+   * Header expand-all toggle — mirrors selectAll(): all expanded → collapse all,
+   * else expand all. One control, whose meaning follows allExpanded().
+   *
+   * Scope is the whole filtered set, matching allExpanded() above. Expanding is
+   * a STATE change (expanded[id] = true) and nothing more: it does not fetch
+   * anything. Child records load when an expanded row is actually rendered - see
+   * the effect in the constructor - so marking 10,000 rows open costs one map,
+   * not 10,000 requests. The old version only opened the current page precisely
+   * because it fetched eagerly here, which also made allExpanded() unreachable
+   * and left the toggle stuck on "Expand all" forever.
+   */
   toggleExpandAll(): void {
     if (this.allExpanded()) {
       this.expanded.set({});
       this.announceService.announce('All rows collapsed');
     } else {
       const e: Record<string, boolean> = {};
-      // Only the rows the user can actually see get opened; expanding 10,000
-      // server rows at once would be neither useful nor survivable.
-      this.sliceInfo().slice.forEach(r => { e[r.id] = true; });
+      this.baseRows().forEach(r => { e[r.id] = true; });
       this.expanded.set(e);
-      if (this.isServerMode()) Object.keys(e).forEach(id => void this.ds.loadChildren(id));
       this.announceService.announce('All rows expanded');
     }
   }
@@ -2951,7 +3186,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       }
       this.activateCell(rowIds[ri], cols[ci]); return;
     }
-    if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); const rk = rowIds[ri]; if (rk === 'header') this.selectAll(); else this.toggleSelect(rk); return; }
+    // Space selects from ANY cell, so it has to follow the Select feature -
+    // otherwise switching the column off would leave a keyboard route into a
+    // selection the user can no longer see or clear.
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      if (!this.hasSelectFeature()) return;
+      const rk = rowIds[ri];
+      if (rk === 'header') this.selectAll(); else this.toggleSelect(rk);
+      return;
+    }
   }
 
   activateCell(rowKey: string, colKey: string): void {
@@ -3024,14 +3268,53 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  Acts on the current selection, so "Select All" + this = delete everything. */
   openBulkDeleteConfirm(e?: Event): void {
     e?.stopPropagation();
-    if (!this.hasSelection()) { this.showToast('Select rows first'); return; }
+    // No "select rows first" guard any more: with nothing selected this button
+    // is Delete all, which needs no selection.
     this.saveFocus(); this.menuField.set(null); this.filterField.set(null);
     this.bulkDeleteOpen.set(true);
-    this.announceService.announce('Delete confirmation dialog opened for ' + this.selCount() + ' selected records');
+    this.announceService.announce(this.deleteAllMode()
+      ? 'Delete confirmation dialog opened for all ' + this.deleteAllCount().toLocaleString() + ' records'
+      : 'Delete confirmation dialog opened for ' + this.selCount() + ' selected records');
     this.focusAfterRender('delete-cancel-btn');
   }
 
+  /** The ids Delete all removes: exactly the set Select All would have covered -
+   *  the whole filtered set across EVERY page, not the page on screen. Server
+   *  mode holds one page at a time, so the adapter has to be asked, and the
+   *  answer is capped the same way selection is. */
+  private async deleteAllTargetIds(): Promise<string[]> {
+    if (this.isServerMode()) return this.ds.matchingIds(this.bulkCap);
+    return this.baseRows().map(r => r.id);
+  }
+
+  async confirmDeleteAll(): Promise<void> {
+    let ids: string[];
+    try {
+      ids = await this.deleteAllTargetIds();
+    } catch {
+      this.bulkDeleteOpen.set(false);
+      this.showToast('Could not delete all records');
+      this.announceService.announce('Delete all failed. Please try again.');
+      return;
+    }
+    const n = ids.length;
+    if (this.isServerMode()) this.ds.removeRows(ids);
+    else this.rows.set(this.rows().filter(r => !ids.includes(r.id)));
+    this.dropFromSelections(ids);
+    this.bulkDeleteOpen.set(false);
+    if (ids.some(id => this.editingCell()?.startsWith(id + '::'))) { this.editingCell.set(null); this.draft.set(''); }
+    this.expanded.set({});
+    this.activeRowKey.set('header');
+    this.activeColKey.set(this.visibleFields()[0] ?? 'lead');
+    this.page.set(0);
+    this.showToast(n.toLocaleString() + ' record' + (n === 1 ? '' : 's') + ' deleted');
+    this.announceService.announce(n.toLocaleString() + ' record' + (n === 1 ? '' : 's') + ' deleted');
+    this.focusAfterRender('gc-header-' + (this.visibleFields()[0] ?? 'lead'));
+    this.cdr.markForCheck();
+  }
+
   confirmBulkDelete(): void {
+    if (this.deleteAllMode()) { void this.confirmDeleteAll(); return; }
     const selIds = Object.keys(this.selected()).filter(id => this.selected()[id]);
     const n = selIds.length;
     if (this.isServerMode()) this.ds.removeRows(selIds);
@@ -3040,11 +3323,14 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.bulkDeleteOpen.set(false);
     // Clear only the DELETED rows' edit state - other rows mid-edit are untouched.
     if (selIds.some(id => this.editingCell()?.startsWith(id + '::'))) { this.editingCell.set(null); this.draft.set(''); }
-    this.activeRowKey.set('header'); this.activeColKey.set('lead');
+    // The lead column can be switched off now, so park on whatever column is
+    // actually first rather than on an element that may not exist.
+    const landing = this.visibleFields()[0] ?? 'lead';
+    this.activeRowKey.set('header'); this.activeColKey.set(landing);
     this.page.set(0);
     this.showToast(n + ' record' + (n === 1 ? '' : 's') + ' deleted');
     this.announceService.announce(n + ' record' + (n === 1 ? '' : 's') + ' deleted');
-    this.focusAfterRender('gc-header-lead');
+    this.focusAfterRender('gc-header-' + landing);
   }
   confirmDelete(): void {
     const id = this.deleteId()!;
@@ -3059,10 +3345,11 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (stillEditing) {
       this.editingCell.set(null); this.draft.set('');
     }
-    this.activeRowKey.set(nextFocus); this.activeColKey.set('lead');
+    const landing = this.visibleFields()[0] ?? 'lead';
+    this.activeRowKey.set(nextFocus); this.activeColKey.set(landing);
     this.showToast('Record deleted' + (row ? ': ' + row.entity : ''));
     this._lastFocused = null;
-    this.focusAfterRender(nextFocus === 'header' ? 'gc-header-lead' : 'gc-' + nextFocus + '-lead');
+    this.focusAfterRender(nextFocus === 'header' ? 'gc-header-' + landing : 'gc-' + nextFocus + '-' + landing);
   }
 
   deleteSelectedRows(): void {

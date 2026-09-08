@@ -33,10 +33,36 @@
 .csc-legend-desc   { font-size:0.7812rem; color:#5b6b76; }
 
 /* ── Card ──────────────────────────────────────────────────────────── */
-.csc-card        { margin:22px 32px 0 32px; border:1px solid #D1D3D4; border-radius:3px; background:#fff; }
+/* position:relative anchors .csc-editable-badge to the card's own corner.
+   The outline is #9aa6ad rather than the #D1D3D4 used for the rules INSIDE the
+   grid: at 1.4:1 against white that outer edge barely registered, and the
+   badge now sits half on it. Only the outline is darkened - the internal cell
+   and row lines stay light, so the boundary reads as the stronger of the two. */
+.csc-card        { position:relative; margin:22px 32px 0 32px; border:1px solid #9aa6ad; border-radius:3px; background:#fff; }
 .csc-card-header { display:flex; align-items:center; padding:14px 18px; border-bottom:1px solid #D1D3D4; background:#fafbfc; }
 .csc-card-title  { font-size:1.125rem; font-weight:700; color:#013a4f; flex:1; }
 .csc-copy-link   { display:flex; align-items:center; gap:6px; font-size:0.75rem; cursor:pointer; }
+
+/* Anchors the editable badge to the grid itself. Cannot be .csc-grid-scroll -
+   that scrolls horizontally and clips, so the badge would drift off with the
+   columns. */
+.csc-grid-area { position:relative; }
+
+/* Editable-grid badge: a bare pencil sitting half-on the table's top-left
+   corner, so it reads as a mark ON the grid rather than a control beside it.
+   No circle, no border, no backing - fully transparent, so the table's own
+   corner shows through the glyph.
+   Offset is half the icon, which is what puts its centre exactly on the corner;
+   it has to track the svg size below. */
+.csc-editable-badge {
+  position:absolute; top:-11px; left:-11px; z-index:3;
+  display:flex; align-items:center; justify-content:center;
+  background:transparent;
+}
+/* Mirrored so the blunt top end leads from the LEFT and the nib falls to the
+   lower right, following the corner it sits on instead of pointing away from
+   the grid. */
+.csc-editable-badge svg { transform:scaleX(-1); }
 
 /* ── Toolbar ───────────────────────────────────────────────────────── */
 .csc-toolbar      { display:flex; align-items:center; gap:2px; padding:8px 14px; border-bottom:1px solid #e6e8e9; flex-wrap:wrap; }
@@ -59,7 +85,9 @@
    track sum, so every row's element box (and therefore its zebra background)
    spans the ENTIRE horizontally-scrollable width — not just the visible part.
    min-width:100% keeps it filling the card when columns are narrower. */
-.csc-grid-inner  { width:max-content; min-width:100%; }
+/* position:relative anchors the resize guide, which has to span the header AND
+   every row - the header row alone is only 48px tall. */
+.csc-grid-inner  { width:max-content; min-width:100%; position:relative; }
 
 .csc-header-row {
   display:grid; min-height:48px; background:#F5F5F5; border-bottom:1px solid #D1D3D4;
@@ -105,8 +133,14 @@
 /* Header cells sit above data cells so a frozen column's header is never
    overlapped while scrolling both ways at once. The header row is already
    sticky top, so this only orders siblings within it. */
+/* z-index 4, not 3: .csc-resize carries z-index 3, and the header row's own
+   sticky z-index makes it a stacking context, so a frozen header cell and a
+   scrolling column's resize handle were competing at the SAME level. Equal
+   z-index falls back to DOM order, and data headers come after the frozen ones -
+   so the handle of a column scrolled underneath painted straight over the
+   frozen block. Its ⋮ icon never did, because that sits at z-index auto. */
 .csc-header-row .csc-gridcell.csc-pinned-left,
-.csc-header-row .csc-gridcell.csc-pinned-right { z-index:3; background:#F5F5F5; }
+.csc-header-row .csc-gridcell.csc-pinned-right { z-index:4; background:#F5F5F5; }
 
 /* Boundary between the frozen block and the scrolling content, so it is clear
    why those columns are standing still. Now the ONLY marker of a pinned column
@@ -237,10 +271,24 @@
 .csc-chk-mark          { color:#fff; font-size:0.75rem; line-height:1; }
 .csc-chk-indeterminate { font-size:0.8125rem; font-weight:900; }
 
-/* Resize handle — default teal */
+/* Resize handle — default teal.
+   Full opacity at rest: at .45 the grip sat well under the 3:1 non-text
+   contrast floor against the #F5F5F5 header and was effectively invisible
+   until hovered, so nobody could tell a column was resizable. It stays SHORT
+   instead, which is what keeps it quieter than the pin separator - that one is
+   the only full-height line in the grid. */
 .csc-resize      { position:absolute; right:-9px; top:0; height:100%; width:18px; cursor:col-resize; z-index:3; display:flex; align-items:center; justify-content:center; pointer-events:all !important; }
-.csc-resize-grip { width:0; min-height:20px; border-left:2px solid #008996; border-right:2px solid #008996; box-sizing:content-box; padding:0 1px; border-radius:1px; opacity:.45; transition:opacity .12s, height .12s; }
-.csc-resize:hover .csc-resize-grip { opacity:1; min-height:30px; }
+.csc-resize-grip { width:0; min-height:20px; border-left:2px solid #008996; border-right:2px solid #008996; box-sizing:content-box; padding:0 1px; border-radius:1px; opacity:1; transition:min-height .12s; }
+.csc-resize:hover .csc-resize-grip { min-height:30px; }
+.csc-resize:hover, .csc-header-resizing .csc-resize { background:rgba(0,137,150,0.12); }
+
+/* Full-height guide while dragging, so the drop position is readable against
+   the rows and not just the header. Lives in .csc-grid-inner, which spans the
+   whole scrollable width, so it lines up with the row content underneath. */
+.csc-resize-guide {
+  position:absolute; top:0; bottom:0; width:2px; background:#008996;
+  pointer-events:none; z-index:5;
+}
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
 .csc-btn-outline { cursor:pointer; font-size:0.8125rem; color:#5b6b76; border:1px solid #D1D3D4; border-radius:3px; padding:8px 16px; background:transparent; font-family:inherit; }
@@ -489,13 +537,12 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
 .csc-cc-order { width:66px; }
 .csc-cc-pin   { width:100px; }
 .csc-chooser-table .csc-chooser-label { flex:none; }
-/* The handle is a real <button> here, so the UA chrome needs resetting. */
 .csc-chooser-table .csc-drag-handle {
-  border:none; background:transparent; padding:2px 4px; font-family:inherit;
-  display:inline-flex; align-items:center; justify-content:center; border-radius:3px;
+  padding:2px 4px; display:inline-flex; align-items:center; justify-content:center; border-radius:3px;
 }
-.csc-chooser-table .csc-drag-handle:hover:not(:disabled) { background:rgba(0,137,150,0.10); }
-.csc-chooser-table .csc-drag-handle:disabled { cursor:default; opacity:.35; }
+.csc-chooser-table .csc-drag-handle:not(.csc-drag-disabled):hover { background:rgba(0,137,150,0.10); }
+/* Dragging is off for hidden columns and while a search filters the list. */
+.csc-chooser-table .csc-drag-handle.csc-drag-disabled { cursor:default; opacity:.35; }
 .csc-pin-select {
   width:100%; min-height:30px; font-family:inherit; font-size:0.8125rem;
   padding:0 4px; border:1px solid #D1D3D4; border-radius:4px; background:#fff; color:#013a4f;

@@ -26,7 +26,14 @@ export interface GridColumnDef {
 export type Section = 'basic' | 'advanced' | 'editable' | 'simple' | 'expandable' | 'all';
 
 export interface NavItem { key:string; label:string; on:boolean; bar:string; bg:string; color:string; weight:string; }
+
+/** What a column renders. 'data' is an ordinary sortable/filterable column; the
+ *  rest are the grid's own controls, which the template renders as their own
+ *  markup but which order, pin and hide like any other column. */
+export type ColKind = 'data' | 'expand' | 'lead' | 'delete';
+
 export interface ColumnView {
+  kind:ColKind;
   field:string; label:string; isAsc:boolean; isDesc:boolean; noSort:boolean; ariaSort:string;
   /** Position in a multi-column sort ("1", "2", …), or null when only one column sorts. */
   sortLevel:string|null; sortTitle:string;
@@ -42,6 +49,9 @@ export interface ColumnView {
   resizerAriaLabel:string; resizerAriaValueNow:string; resizerAriaMin:string; resizerAriaMax:string;
 }
 export interface CellView {
+  /** Mirrors the column's kind, so a row renders its cells in the same order
+   *  the header renders its columns. */
+  kind:ColKind;
   field:string; value:string; isLink:boolean; isEditing:boolean; isText:boolean;
   ariaColIndex:string; cellId:string; tabIndex:string; draft:string; isRowHeader:boolean;
   /** Cell-level editability, derived from the column definition. */
@@ -86,7 +96,14 @@ export interface ChooserItem {
   field:string; label:string; visible:boolean; posFieldId:string; boxBorder:string; boxBg:string;
   draggable:boolean; dragOpacity:number; dropShadow:string; posVal:string;
   /** '' | 'left' | 'right' — the empty string is the <select> value for "not pinned". */
-  pin:string; pinId:string; dragId:string; dragLabel:string;
+  pin:string; pinId:string;
+  /** For action columns: says that unchecking switches the feature off, not
+   *  just the column. Empty for data columns. */
+  featureNote:string;
+  /** Each control names itself fully — "Document order", "Document pin" — rather
+   *  than borrowing context from the <th> above it, which role="presentation"
+   *  removes from the accessibility tree. */
+  showLabel:string; orderLabel:string; pinLabel:string;
 }
 export interface AddField {
   field:string; label:string; value:string; fieldId:string; errorId:string;
