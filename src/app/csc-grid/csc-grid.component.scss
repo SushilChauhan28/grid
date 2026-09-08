@@ -93,7 +93,7 @@
   display:grid; min-height:48px; background:#F5F5F5; border-bottom:1px solid #D1D3D4;
   position:sticky; top:0; z-index:2;
 }
-.csc-header-lead   { display:flex; align-items:center; gap:2px; padding-left:12px; border-right:1px solid #D1D3D4; }
+.csc-header-lead   { display:flex; align-items:center; justify-content:center; gap:2px; border-right:1px solid #D1D3D4; }
 .csc-header-action { display:flex; align-items:center; justify-content:center; border-right:1px solid #D1D3D4; }
 .csc-header-cell {
   position:relative;
@@ -143,26 +143,30 @@
 .csc-header-row .csc-gridcell.csc-pinned-right { z-index:4; background:#F5F5F5; }
 
 /* Boundary between the frozen block and the scrolling content, so it is clear
-   why those columns are standing still. Now the ONLY marker of a pinned column
-   in the grid - the header pin badge was removed - so it is a definite line
-   rather than a soft shadow, and darker than the #D1D3D4 rule between ordinary
-   columns so the two do not read as the same thing.
-   Drawn with box-shadow, not border-right: these cells are CSS grid tracks
-   sized to a measured width, and a border would add to that width and push the
-   frozen offsets out of step with pinOffsets(). A shadow takes no space.
-   The data column HEADER binds box-shadow inline for the drag drop-target
-   indicator, which beats any stylesheet rule, so that one case is drawn with a
-   pseudo-element instead (.csc-header-cell has no overflow of its own, only its
-   inner .csc-header-content does, so the ::before is not clipped). */
-.csc-grid-inner .csc-gridcell.csc-pin-edge-left:not(.csc-header-cell)  { box-shadow: 1px 0 0 0 rgba(1,58,79,0.55); }
-.csc-grid-inner .csc-gridcell.csc-pin-edge-right:not(.csc-header-cell) { box-shadow: -1px 0 0 0 rgba(1,58,79,0.55); }
-.csc-header-cell.csc-pin-edge-left::before,
-.csc-header-cell.csc-pin-edge-right::before {
-  content:""; position:absolute; top:0; min-height:100%; width:1px; pointer-events:none;
-  background: rgba(1,58,79,0.55);
+   why those columns are standing still. The ONLY marker of a pinned column in
+   the grid - the header pin badge was removed - so it is darker than the
+   #D1D3D4 rule between ordinary columns, and the two do not read as the same.
+
+   This RECOLOURS the rule that is already there rather than drawing a second
+   one. The old box-shadow sat 1px outside the box while border-right sat 1px
+   inside it, so the pinned edge showed as two touching lines - a light grey one
+   and a dark one - instead of a single definite boundary.
+
+   The earlier note here warned against border-right because these cells are
+   CSS grid tracks sized to a measured width, and an extra border would widen
+   them and desync pinOffsets(). That still holds for ADDING a border; changing
+   the colour of the one every cell already carries costs no width at all. It
+   also sidesteps the reason the header needed a ::before: the header binds
+   box-shadow inline for the drag drop-target indicator and would beat a
+   stylesheet shadow, but nothing there touches border-color.
+
+   The right edge is drawn on the PREVIOUS cell (:has(+ …)) because that is
+   whose border sits on the boundary - these cells have no border-left to
+   recolour, and adding one would shift the track. */
+.csc-grid-inner .csc-gridcell.csc-pin-edge-left,
+.csc-grid-inner .csc-gridcell:has(+ .csc-gridcell.csc-pin-edge-right) {
+  border-right-color: rgba(1,58,79,0.55);
 }
-.csc-header-cell.csc-pin-edge-left::before  { right:-1px; }
-.csc-header-cell.csc-pin-edge-right::before { left:-1px; }
 
 .csc-col-label {
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-right:auto; pointer-events:none;
@@ -189,8 +193,20 @@
      boundary line to separate them. */
   border-right:1px solid #D1D3D4;
 }
-.csc-gridcell:focus-visible { outline:2px solid #008996; outline-offset:-2px; border-radius:2px; }
-.csc-lead-cell    { display:flex; align-items:center; gap:2px; padding-left:12px; }
+/* The extra .csc-grid-inner is doing real work. This rule already asked for an
+   INSET ring, but the generic `[tabindex]:focus-visible` further down carries
+   the same (0,2,0) specificity and comes later, so it won and the ring was
+   drawn 1px OUTSIDE the cell - where the neighbouring column's 18px resize
+   handle (z-index 3, above the cell) covered its left and right edges, and
+   where the lead column's edge fell outside .csc-grid-scroll and was clipped
+   by its overflow. Hence a ring visible only along the top and bottom.
+   Drawn inside, nothing can overlap or clip it. */
+.csc-grid-inner .csc-gridcell:focus-visible { outline:2px solid #008996; outline-offset:-2px; border-radius:2px; }
+/* justify-content:center, like .csc-action-cell below. The lead column was the
+   one action column left aligned by a padding-left instead of being centred,
+   so its checkbox sat 12px from the left and 7px from the right of a 43px
+   track - visibly off to one side. */
+.csc-lead-cell    { display:flex; align-items:center; justify-content:center; gap:2px; }
 .csc-action-cell  { display:flex; align-items:center; justify-content:center; }
 .csc-data-cell    { display:flex; align-items:center; gap:6px; padding:0 10px; min-width:0; font-size:0.75rem;
   /* Without this, cell content (esp. the doc icon+link, which is nowrap) paints
