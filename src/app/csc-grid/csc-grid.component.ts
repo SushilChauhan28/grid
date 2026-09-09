@@ -298,6 +298,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   gotoVal     = signal('');
   /** True while select-all is fetching the ids of every matching row. */
   selectingAll = signal(false);
+  /** Same guard as selectingAll: the id fetch behind Expand all is async, and a
+   *  second click while it is in flight would race two writes to `expanded`. */
+  expandingAll = signal(false);
   /** Ceiling shared by select-all and export so the two never disagree about
    *  how much of a result set a bulk action covers. */
   private readonly bulkCap = 10000;
@@ -3093,32 +3096,68 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   /** True when every row is currently expanded (drives the header expand-all chevron). */
-  allExpanded = computed(() => {
-    const rows = this.baseRows(); const e = this.expanded();
-    return rows.length > 0 && rows.every(r => e[r.id]);
+  /** Mirrors selTotal / selCount / allSelected, and for the same reason: in
+   *  server mode baseRows() is only the LOADED page, so counting against it
+   *  made "all expanded" mean "this page is expanded". The denominator comes
+   *  from the server and the numerator from the expanded map instead. */
+  expandTotal = computed(() => this.isServerMode() ? this.ds.total() : this.baseRows().length);
+  expandCount = computed(() => {
+    const e = this.expanded();
+    if (this.isServerMode()) return Object.keys(e).filter(k => e[k]).length;
+    return this.baseRows().filter(r => e[r.id]).length;
   });
+  allExpanded = computed(() => { const t = this.expandTotal(); return t > 0 && this.expandCount() >= t; });
 
   /**
    * Header expand-all toggle — mirrors selectAll(): all expanded → collapse all,
    * else expand all. One control, whose meaning follows allExpanded().
    *
-   * Scope is the whole filtered set, matching allExpanded() above. Expanding is
-   * a STATE change (expanded[id] = true) and nothing more: it does not fetch
-   * anything. Child records load when an expanded row is actually rendered - see
-   * the effect in the constructor - so marking 10,000 rows open costs one map,
-   * not 10,000 requests. The old version only opened the current page precisely
-   * because it fetched eagerly here, which also made allExpanded() unreachable
-   * and left the toggle stuck on "Expand all" forever.
+   * Scope is the whole filtered set, matching allExpanded() above. Expanding a
+   * row is a STATE change (expanded[id] = true) and nothing more - no child
+   * records are fetched here. They load when an expanded row is actually
+   * rendered, see the effect in the constructor, so marking 10,000 rows open
+   * costs one map rather than 10,000 requests.
    */
   toggleExpandAll(): void {
+    if (this.expandingAll()) return;
     if (this.allExpanded()) {
       this.expanded.set({});
       this.announceService.announce('All rows collapsed');
-    } else {
+      return;
+    }
+    if (this.isServerMode()) { void this.expandAllMatching(); return; }
+    const e: Record<string, boolean> = {};
+    this.baseRows().forEach(r => { e[r.id] = true; });
+    this.expanded.set(e);
+    this.announceService.announce('All rows expanded');
+  }
+
+  /** Server mode never holds more than one page, so "all" cannot be enumerated
+   *  from what is loaded - marking only the loaded ids left every other page
+   *  collapsed and flipped the toggle back to "Expand all" on the next page.
+   *  The adapter is asked for the matching ids instead, exactly as
+   *  selectAllMatching() does, and capped the same way. Only ids come back;
+   *  the child records still load per row, on render. */
+  private async expandAllMatching(): Promise<void> {
+    this.expandingAll.set(true);
+    this.announceService.announce('Expanding all matching rows');
+    try {
+      const ids = await this.ds.matchingIds(this.bulkCap);
       const e: Record<string, boolean> = {};
-      this.baseRows().forEach(r => { e[r.id] = true; });
+      ids.forEach(id => { e[id] = true; });
       this.expanded.set(e);
-      this.announceService.announce('All rows expanded');
+      const total = this.ds.total();
+      const capped = ids.length < total
+        ? `. Expansion is capped at ${this.bulkCap.toLocaleString()} rows, so ${(total - ids.length).toLocaleString()} matching rows are not expanded`
+        : '';
+      this.announceService.announce(`${ids.length.toLocaleString()} rows expanded${capped}`);
+      if (capped) this.showToast(`Expanded the first ${ids.length.toLocaleString()} of ${total.toLocaleString()} rows`);
+    } catch {
+      this.showToast('Could not expand all rows');
+      this.announceService.announce('Expand all failed. Please try again.');
+    } finally {
+      this.expandingAll.set(false);
+      this.cdr.markForCheck();
     }
   }
 
