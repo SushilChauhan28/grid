@@ -71,6 +71,11 @@ function defaultPins(): Record<string, 'left' | 'right'> {
   return Object.fromEntries(ACTION_FIELDS.map(f => [f, 'left' as const]));
 }
 
+/** Narrowest a column may be resized to, by mouse or keyboard. Also what the
+ *  resize grip advertises as aria-valuemin, so the announced range and the
+ *  enforced range cannot drift apart. */
+const MIN_COL_W = 60;
+
 // ─── Section-isolated state ───────────────────────────────────────────────────
 interface SectionState {
   sortField: string | null;
@@ -115,6 +120,12 @@ function makeRows(): CscRow[] {
   });
 }
 
+/** One dataset, handed to every section as the SAME reference. Sections fork it
+ *  only when they mutate it, so loading costs nothing extra. */
+function seedBySection(rows: CscRow[]): Record<Section, CscRow[]> {
+  return { basic: rows, advanced: rows, editable: rows, simple: rows, expandable: rows, all: rows };
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 @Component({
   selector: 'app-csc-grid',
@@ -131,7 +142,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
   /** Real row data from the host app. Falls back to built-in demo rows when not provided. */
   @Input() set data(v: CscRow[] | null | undefined) {
-    if (v && v.length) { this._hostRows = true; this.rows.set(v); this.clearAllSelections(); this.page.set(0); }
+    if (v && v.length) { this._hostRows = true; this.setRowsForAllSections(v); this.clearAllSelections(); this.page.set(0); }
   }
   /** Host-supplied rows win over the live fetch, whichever arrives first. */
   private _hostRows = false;
@@ -167,7 +178,35 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
   // ── Global state (shared across sections) ─────────────────────────────────
   section  = signal<Section>('basic');
-  rows     = signal<CscRow[]>(makeRows());
+  /**
+   * Row data is owned PER SECTION, not globally.
+   *
+   * The six demo sections are independent feature demos, not one shared
+   * workspace: an edit made in Editable has no business appearing in Basic,
+   * which is not even editable. A single `rows` signal made every section share
+   * one array, so committing a cell in Editable rewrote the array Basic was
+   * reading and its dirty marker (keyed only 'rowId::field') lit up there too.
+   *
+   * Isolation is by reference, not by copying: every section starts pointing at
+   * the SAME array, and every mutation here is already copy-on-write
+   * (`rows.map(...)` / `filter(...)`), so a write forks only the writing
+   * section's array — and inside it, only the row object that actually changed.
+   * Untouched sections keep the original array and the original row objects, so
+   * nothing is cloned until something is edited. Row ids are never rewritten,
+   * so selection, expansion and focus keys stay valid across the fork.
+   */
+  private _rowsBySection = signal<Record<Section, CscRow[]>>(seedBySection(makeRows()));
+  rows = computed(() => this._rowsBySection()[this.section()]);
+  /** Writes rows for the CURRENT section only. Every mutation path goes here. */
+  private setRows(next: CscRow[]): void {
+    const s = this.section();
+    this._rowsBySection.update(all => ({ ...all, [s]: next }));
+  }
+  /** Seeds every section from one dataset — loading data is not a mutation, so
+   *  all six go back to sharing a single array reference. */
+  private setRowsForAllSections(next: CscRow[]): void {
+    this._rowsBySection.set(seedBySection(next));
+  }
   /** Selection is per-section, not global: checking rows in Basic must not
    *  show them checked in Advanced / Editable / Expandable. */
   private _selectedBySection = signal<Record<Section, Record<string, boolean>>>({
@@ -225,10 +264,27 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  'rowId::field'. Survives commit (unlike drafts) because it is the
    *  "you changed this" indicator, and is cleared automatically when a value
    *  is edited back to what it started as. */
-  dirtyCells  = signal<Record<string, boolean>>({});
+  /** Per section, for the same reason rows are: the key is 'rowId::field' with
+   *  no section component, so one shared map showed Editable's markers in Basic
+   *  on the very same row id. */
+  private _dirtyBySection = signal<Record<Section, Record<string, boolean>>>({
+    basic: {}, advanced: {}, editable: {}, simple: {}, expandable: {}, all: {},
+  });
+  dirtyCells = computed(() => this._dirtyBySection()[this.section()]);
+  private updateDirty(fn: (m: Record<string, boolean>) => Record<string, boolean>): void {
+    const s = this.section();
+    this._dirtyBySection.update(all => ({ ...all, [s]: fn(all[s]) }));
+  }
   /** Pristine snapshot taken on first edit of a cell, used to detect when a
-   *  value has been returned to its original and the marker should clear. */
-  private _original: Record<string, string> = {};
+   *  value has been returned to its original and the marker should clear.
+   *  Per section too: sections now hold different values for the same cell, so
+   *  one shared baseline would compare an edit against another section's data. */
+  private _originalBySection: Record<Section, Record<string, string>> = {
+    basic: {}, advanced: {}, editable: {}, simple: {}, expandable: {}, all: {},
+  };
+  private get _original(): Record<string, string> {
+    return this._originalBySection[this.section()];
+  }
 
   /** Column-level editability. Undefined means editable (opt-out, not opt-in). */
   isFieldEditable(field: string): boolean {
@@ -280,8 +336,12 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
   cDragField  = signal<string | null>(null);
   cDropTarget = signal<string | null>(null);
+  /** Which side of the hovered row/column the drop would land on, so the
+   *  insertion line is drawn where the column will actually go. */
+  cDropAfter  = signal(false);
   dragField   = signal<string | null>(null);
   dropTarget  = signal<string | null>(null);
+  dropAfter   = signal(false);
   filterField = signal<string | null>(null);
   filterX     = signal(0);
   filterY     = signal(0);
@@ -297,6 +357,47 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   copied      = signal(false);
   gotoVal     = signal('');
   /** True while select-all is fetching the ids of every matching row. */
+  /**
+   * Tooltip for text a column is too narrow to show.
+   *
+   * Nothing is precomputed. Whether a cell is clipped depends on the column
+   * width, the text-size stepper and the data itself - all of which change
+   * constantly, and 50 rows x 15 columns is 750 measurements to keep fresh.
+   * Measuring the one element under the pointer, at the moment it is asked
+   * for, is both cheaper and always right.
+   */
+  /** `flip` = placed ABOVE the cell rather than below it. */
+  truncTip = signal<{ text: string; x: number; y: number; flip: boolean } | null>(null);
+  /** Long enough that sweeping the mouse across the grid, or arrowing through a
+   *  row, never strobes a tooltip on every cell it passes. This delay is what
+   *  makes a focus-triggered tooltip usable at all. */
+  private readonly tipDelay = 400;
+  private _tipTimer: ReturnType<typeof setTimeout> | null = null;
+  private _tipHideTimer: ReturnType<typeof setTimeout> | null = null;
+  private _tipSource: HTMLElement | null = null;
+  /** The cell the visible tooltip belongs to. Held so every reposition can
+   *  re-read its rect: a rect captured once goes stale the moment anything
+   *  scrolls, and the tooltip is position:fixed, so a stale rect strands it
+   *  over unrelated rows instead of following its cell. */
+  private _tipAnchor: HTMLElement | null = null;
+  /** The clipped text element inside the anchor. It supplies the VERTICAL edge
+   *  the tooltip sits against; the anchor cell supplies the horizontal one. */
+  private _tipTextEl: HTMLElement | null = null;
+  /**
+   * The tooltip sits 1px off the source cell's TEXT, not off the cell box.
+   *
+   * A bigger gap looks like breathing room but there is none to take: rows are
+   * adjacent - a cell's bottom edge IS the next row's top edge - so every pixel
+   * of gap was carved out of the row below. The text lines are not adjacent
+   * though: a 42px row carries 15px of glyphs centred in it, leaving an empty
+   * band between one line and the next that the tooltip drops into instead of
+   * landing on either.
+   */
+  private readonly tipGap = 1;
+  /** Viewport inset kept clear on every side, and the threshold the flip
+   *  decision is measured against. */
+  private readonly tipPad = 8;
+
   selectingAll = signal(false);
   /** Same guard as selectingAll: the id fetch behind Expand all is async, and a
    *  second click while it is in flight would race two writes to `expanded`. */
@@ -334,6 +435,21 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     expandable: this.autoWidths(), all: this.autoWidths(),
   });
   resizeModeField = signal<string | null>(null); // currently in keyboard resize mode
+  /**
+   * Shrink that the minimum-width clamp REFUSED, so a later grow can give it
+   * back before it grows anything.
+   *
+   * Without this, arrow resize is not reversible across the clamp: from 127px,
+   * Shift+Left applies -50 to 77, Shift+Left asks for -50 but can only apply
+   * -17 (60px floor) and throws the other 33 away, then two Shift+Rights apply
+   * a full +50 each and land on 160. The clamp truncates the applied delta
+   * while the reverse press still assumes the full step was applied.
+   *
+   * `width` is the width this component last wrote. If the stored width has
+   * moved since - a mouse drag, autosize, Reset columns - the slack is stale
+   * and gets dropped, so it can never silently eat a later keypress.
+   */
+  private _resizeSlack: { field: string; width: number; debt: number } | null = null;
 
   // ── Internal caches ───────────────────────────────────────────────────────
   private nextSeq = signal(1);
@@ -577,11 +693,21 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    */
   pinOffsets = computed(() => {
     const left: Record<string, number> = {}, right: Record<string, number> = {};
+    /** Paint order INSIDE a frozen block. A resize handle overhangs 9px into the
+     *  next column, and a pinned header cell carries a z-index - which makes it
+     *  a stacking context, so the handle can never rise above a sibling cell no
+     *  matter what z-index the handle itself is given. The only thing that
+     *  works is lifting the OWNING cell above the pinned sibling it overhangs,
+     *  so each block is painted first-above-last. Cells in a block never
+     *  overlap anywhere else, so the reversal costs nothing. Everything stays
+     *  above 3, which is what keeps a scrolling column's handle from painting
+     *  over the frozen block (see the .csc-pinned-left rule). */
+    const z: Record<string, number> = {};
     const pinned = this.pinnedCols();
     const vis = this.visibleFields();
     const anyLeft  = vis.some(f => pinned[f] === 'left');
     const anyRight = vis.some(f => pinned[f] === 'right');
-    if (!anyLeft && !anyRight) return { left, right, lastLeft: null as string | null, firstRight: null as string | null };
+    if (!anyLeft && !anyRight) return { left, right, z, lastLeft: null as string | null, firstRight: null as string | null };
 
     const lw = this.leadWidths(), w = this._colWidths;
     const widthOf = (key: string): number | null => {
@@ -591,6 +717,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     };
 
     const leftKeys = vis.filter(f => pinned[f] === 'left');
+    leftKeys.forEach((k, i) => { z[k] = 4 + (leftKeys.length - i); });
     let acc = 0, lastLeft: string | null = null;
     for (const k of leftKeys) {
       const cw = widthOf(k);
@@ -602,6 +729,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
     // Freeze order from the right: walk the right-pinned group backwards.
     const rightKeys = vis.filter(f => pinned[f] === 'right');
+    rightKeys.forEach((k, i) => { z[k] = 4 + (rightKeys.length - i); });
     let racc = 0, firstRight: string | null = null;
     for (let i = rightKeys.length - 1; i >= 0; i--) {
       const k = rightKeys[i], cw = widthOf(k);
@@ -610,8 +738,15 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       racc += cw;
       firstRight = k;
     }
-    return { left, right, lastLeft, firstRight };
+    return { left, right, z, lastLeft, firstRight };
   });
+
+  /** Paint order for a pinned HEADER cell, or null when it is not frozen.
+   *  Header cells only - data rows have no resize handle to uncover. */
+  pinZ(key: string): number | null {
+    const v = this.pinOffsets().z[key];
+    return v === undefined ? null : v;
+  }
 
   /** Sticky left offset for a column/action key, or null if it isn't frozen. */
   pinLeft(key: string): number | null {
@@ -680,7 +815,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
           headerAriaLabel: this.colLabel(field) + ' actions' + pinNote, headerAriaDesc: '',
           sortBg: 'transparent', sortBorder: 'none', filterBg: 'transparent', filterBorder: 'none',
           showMenu: false, resizable: false, showEditableIcon: false,
-          draggable: false, dragOpacity: 1, dropShadow: 'none',
+          // Reorderable exactly like a data column. The Choose columns dialog
+          // has always let these be moved (they carry an Order field like every
+          // other row), so leaving them out of drag and drop meant the two
+          // paths disagreed about what the user was allowed to do - and the
+          // header path failed silently, because a cell with no drop handler
+          // simply swallows the drop.
+          draggable: canReorder, dragOpacity: this.dragField() === field ? 0.4 : 1,
+          dropShadow: canReorder && this.dropTarget() === field
+            && this.dragField() && this.dragField() !== field
+            ? (this.dropAfter() ? 'inset -3px 0 0 0 ' + a : 'inset 3px 0 0 0 ' + a) : 'none',
           isRowHeader: false, isResizing: false,
           resizerAriaLabel: '', resizerAriaValueNow: '', resizerAriaMin: '', resizerAriaMax: '',
         } satisfies ColumnView;
@@ -729,13 +873,14 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
         showMenu: this.canMenu(), resizable,
         showEditableIcon: this.canEdit() && !this.isSimple() && this.isFieldEditable(field),
         draggable: canReorder, dragOpacity: this.dragField() === field ? 0.4 : 1,
-        dropShadow: isDropTarget ? 'inset 3px 0 0 0 ' + a : 'none',
+        dropShadow: isDropTarget
+          ? (this.dropAfter() ? 'inset -3px 0 0 0 ' + a : 'inset 3px 0 0 0 ' + a) : 'none',
         isRowHeader: field === rhf,
         isResizing: this.resizeModeField() === field,
         // ARIA separator pattern for the resize grip (role="separator" applied in template)
         resizerAriaLabel: c.label + ' column resizer',
         resizerAriaValueNow: String(this._colWidths[field] ?? 120),
-        resizerAriaMin: '60',
+        resizerAriaMin: String(MIN_COL_W),
         resizerAriaMax: '800',
       };
     });
@@ -1172,7 +1317,8 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
         // the full order. It is off for hidden columns too - they have no place
         // in the visible order to be moved within.
         draggable: !cq && visible, dragOpacity: cdf === field ? 0.4 : 1,
-        dropShadow: isDrop ? 'inset 0 3px 0 0 ' + a : 'none',
+        dropShadow: isDrop
+          ? (this.cDropAfter() ? 'inset 0 -3px 0 0 ' + a : 'inset 0 3px 0 0 ' + a) : 'none',
         // A thin rule wherever the pin section changes, mirroring the frozen
         // boundary drawn in the grid. Computed after the search filter so a
         // filtered-away section never leaves a stray leading rule.
@@ -1351,7 +1497,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     try {
       const rows = await this.ds.fetchDataset(this.bulkCap);
       if (!rows.length || this._hostRows) return;
-      this.rows.set(rows as CscRow[]);
+      this.setRowsForAllSections(rows as CscRow[]);
       this.clearAllSelections();
       this.page.set(0);
       this.announceService.announce(rows.length.toLocaleString() + ' records loaded');
@@ -1366,6 +1512,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.scheduleDefaultAutosize(this.section());
     this._docKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // First in the chain: a tooltip has to be dismissible on its own
+        // without tearing down whatever is behind it (WCAG 1.4.13). A second
+        // Escape then reaches the resize mode, dialog or menu as usual.
+        if (this.truncTip())           { this.hideTip(); return; }
         if (this.resizeModeField())    { this.exitResizeMode(); return; }
         if (this.deleteId() != null || this.bulkDeleteOpen()) { this.closeDeleteConfirm(); return; }
         if (this.addOpen())            { this.closeAddModal(); return; }
@@ -1398,6 +1548,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     document.addEventListener('keydown', this._docKeyDown, true);
     document.addEventListener('focusin', this._docFocusIn, true);
     window.addEventListener('scroll', this._onScroll, { passive: true, capture: true });
+    window.addEventListener('resize', this._onWinResize);
   }
 
   ngAfterViewChecked(): void {
@@ -1413,6 +1564,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     document.removeEventListener('keydown', this._docKeyDown, true);
     document.removeEventListener('focusin', this._docFocusIn, true);
     window.removeEventListener('scroll', this._onScroll, true);
+    window.removeEventListener('resize', this._onWinResize);
     this.removeFilterScrollListener();
     this.removeComboScrollListener();
     clearTimeout(this._toastTimer);
@@ -1434,6 +1586,130 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (this._lastFocused && document.contains(this._lastFocused)) {
       this._lastFocused.focus(); this._lastFocused = null;
     }
+  }
+
+  // ── Truncation tooltip ────────────────────────────────────────────────────
+  /** The clipped text inside a trigger, or null when nothing is cut off.
+   *  The +1 absorbs sub-pixel layout: this grid renders 0.667px borders at some
+   *  zoom levels, and scrollWidth/clientWidth round against each other. */
+  private clippedText(host: HTMLElement): HTMLElement | null {
+    const sel = '.csc-cell-text, .csc-doc-link, .csc-col-label';
+    // A cell being edited renders an <input> instead of .csc-cell-text, so the
+    // "not while editing" rule falls out of this lookup rather than needing a
+    // separate guard.
+    const el = (host.matches(sel) ? host : host.querySelector(sel)) as HTMLElement | null;
+    return el && el.scrollWidth > el.clientWidth + 1 ? el : null;
+  }
+
+  /** Hover or focus on a cell / header label. Arms the delay; the tooltip only
+   *  appears if the text is still clipped and the pointer is still here when it
+   *  fires. */
+  onTipEnter(trigger: HTMLElement): void {
+    if (this._tipHideTimer) { clearTimeout(this._tipHideTimer); this._tipHideTimer = null; }
+    if (this._tipTimer) clearTimeout(this._tipTimer);
+    this._tipSource = trigger;
+    this._tipTimer = setTimeout(() => {
+      // Focus may have moved on during the delay - showing now would flash a
+      // tooltip for a cell the user has already left.
+      if (this._tipSource !== trigger) return;
+      const el = this.clippedText(trigger);
+      if (!el) return;
+      this.placeTip(trigger, el, (el.textContent ?? '').trim());
+    }, this.tipDelay);
+  }
+
+  /** Cancels a pending tooltip, or starts dismissing a visible one. The short
+   *  grace period is what lets the pointer travel onto the tooltip without it
+   *  vanishing underneath - WCAG 1.4.13's "hoverable". */
+  onTipLeave(): void {
+    if (this._tipTimer) { clearTimeout(this._tipTimer); this._tipTimer = null; }
+    this._tipSource = null;
+    if (this._tipHideTimer) clearTimeout(this._tipHideTimer);
+    this._tipHideTimer = setTimeout(() => {
+      this.truncTip.set(null);
+      this._tipAnchor = null; this._tipTextEl = null;
+      this.cdr.markForCheck();
+    }, 120);
+  }
+
+  /** Pointer entered the tooltip itself - keep it up. */
+  keepTip(): void {
+    if (this._tipHideTimer) { clearTimeout(this._tipHideTimer); this._tipHideTimer = null; }
+  }
+
+  hideTip(): void {
+    if (this._tipTimer) { clearTimeout(this._tipTimer); this._tipTimer = null; }
+    if (this._tipHideTimer) { clearTimeout(this._tipHideTimer); this._tipHideTimer = null; }
+    this._tipSource = null;
+    this._tipAnchor = null; this._tipTextEl = null;
+    this.truncTip.set(null);
+  }
+
+  /** Anchored to the CELL, not the text span, so header and data tooltips line
+   *  up the same way. Below the row by default: covering the next row is far
+   *  less harmful than covering the rest of the row being read. */
+  private placeTip(trigger: HTMLElement, textEl: HTMLElement, text: string): void {
+    const anchor = (trigger.closest('.csc-gridcell') as HTMLElement) ?? trigger;
+    this._tipAnchor = anchor;
+    this._tipTextEl = textEl;
+    const r = anchor.getBoundingClientRect(), tb = textEl.getBoundingClientRect();
+    this.truncTip.set({ text, x: r.left, y: tb.bottom + this.tipGap, flip: false });
+    this.cdr.markForCheck();
+    // Its height is unknown until it has rendered, so the clamp and the flip
+    // happen once it exists. setTimeout, not rAF - rAF does not fire in a
+    // hidden or throttled tab, which would strand the tooltip off-screen.
+    setTimeout(() => this.reflowTip());
+  }
+
+  /** Re-runs the placement against the anchor's CURRENT rect and the tooltip's
+   *  measured height. Called once after first render and again on every scroll
+   *  or resize, because position:fixed does not travel with a scrolling cell.
+   *
+   *  Below by default: covering the next row is far less harmful than covering
+   *  the rest of the row being read. Rows are adjacent, so "below" always means
+   *  over the next row - there is no empty band between them to drop into. */
+  private reflowTip(): void {
+    const cur = this.truncTip();
+    const anchor = this._tipAnchor;
+    if (!cur || !anchor) return;
+    const tip = document.getElementById('csc-trunc-tip');
+    if (!tip) return;
+    if (!document.contains(anchor)) { this.hideTip(); this.cdr.markForCheck(); return; }
+
+    const r = anchor.getBoundingClientRect();
+    // Scrolled clean out of its own grid body: a tooltip left hovering over the
+    // toolbar or the pager is pointing at nothing.
+    const clip = (anchor.closest('.csc-grid-scroll') as HTMLElement | null)?.getBoundingClientRect();
+    if (clip && (r.bottom <= clip.top || r.top >= clip.bottom ||
+                 r.right <= clip.left || r.left >= clip.right)) {
+      this.hideTip(); this.cdr.markForCheck(); return;
+    }
+
+    const t = tip.getBoundingClientRect();
+    // Vertical anchor is the TEXT's edge, not the cell's.
+    //
+    // Rows touch - a cell's bottom edge IS the next row's top edge - so a
+    // tooltip hung off the cell had nowhere to go but on top of the next row's
+    // words. The text lines do NOT touch: a 42px row carries 15px of glyphs
+    // centred in it, leaving ~14px of padding below one line and ~13px above
+    // the next - a 28px empty gutter that a 27px tooltip fits inside. Sitting
+    // against the text instead of the box puts it in that gutter, covering
+    // neither line. Measured live rather than hardcoded, because the padding
+    // grows with the text-size stepper and shrinks in compact density.
+    const tEl = this._tipTextEl;
+    const tb = tEl && document.contains(tEl) ? tEl.getBoundingClientRect() : r;
+    const x = Math.max(this.tipPad, Math.min(r.left, window.innerWidth - t.width - this.tipPad));
+    const below = tb.bottom + this.tipGap;
+    const above = tb.top - t.height - this.tipGap;
+    // Flip only when the measured height genuinely does not fit below, and only
+    // when there is somewhere better to go.
+    const flip = below + t.height > window.innerHeight - this.tipPad && above > this.tipPad;
+    const y = flip ? above : below;
+    // Scroll fires continuously; skip the write when nothing moved so the
+    // tooltip does not re-render on every frame of a scroll.
+    if (Math.abs(cur.x - x) < 0.5 && Math.abs(cur.y - y) < 0.5 && cur.flip === flip) return;
+    this.truncTip.set({ text: cur.text, x, y, flip });
+    this.cdr.markForCheck();
   }
 
   showToast(msg: string): void {
@@ -1955,10 +2231,33 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   /** Drag-and-drop reorder, shared by the header row and the chooser list. */
-  reorderTo(from: string, to: string): void {
-    if (!from || from === to) return;
+  /**
+   * `after` is which SIDE of the target the pointer was on.
+   *
+   * Without it a drop could only ever mean "insert before this column", so the
+   * last slot of a section was unreachable by dragging: to land after the final
+   * column you have to be able to say "after", and nothing in the drag path
+   * could. Dropping on the final column instead parked the dragged one in
+   * second-to-last, and dropping on your own immediate right neighbour removed
+   * and reinserted you in the same slot - a silent no-op that looked like the
+   * drag had been ignored. Both symptoms are the same missing bit.
+   */
+  reorderTo(from: string, to: string, after = false): void {
+    if (!from) return; // no drag in progress - not a user-visible outcome
+    // Every OTHER outcome says something. A drop that lands on a cell which
+    // quietly ignores it is the worst of the three: a sighted user sees the
+    // column snap back with no reason given, and a screen reader user gets
+    // nothing at all after "Grabbed ... for reordering".
+    if (from === to) {
+      this.announceService.announce(this.colLabel(from) + ' is already in that position');
+      return;
+    }
     const hidden = this.colHidden();
-    if (hidden[from] || hidden[to]) return; // no visible order to move within
+    if (hidden[from] || hidden[to]) {
+      this.announceService.announce(
+        this.colLabel(hidden[from] ? from : to) + ' is hidden and has no position to move to');
+      return;
+    }
     // A drop across a pin boundary is refused rather than half-applied: the
     // regrouping in projectVisible would put the column straight back, so the
     // drag would move nothing while still claiming it had. Changing the pin
@@ -1971,12 +2270,19 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const order = this.withSectionResequenced(from, seq => {
       const s = seq.filter(f => f !== from), i = s.indexOf(to);
       if (i < 0) return seq;
-      s.splice(i, 0, from);
+      // i + 1 lands past the end when `to` is the last column, which is exactly
+      // how the final slot becomes reachable.
+      s.splice(after ? i + 1 : i, 0, from);
       return s;
     });
     this.menuField.set(null);
     const vPos = this.applyOrderIfVisiblyChanged(from, order);
-    if (vPos === null) return; // dropped where it already was - nothing moved
+    if (vPos === null) {
+      // Storage may have accepted the move while the projection undid it, so
+      // the screen did not change. Say so rather than looking broken.
+      this.announceService.announce(this.colLabel(from) + ' is already in that position');
+      return;
+    }
     this.showToast(this.colLabel(from) + ' moved, position '
       + vPos + ' of ' + this.visibleFields().length);
   }
@@ -2028,13 +2334,31 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   /** Spinbutton keys on the position field. Handled explicitly (rather than
    *  relying on <input type="number">'s native spinner) so focus survives the
    *  re-render that reordering triggers. Bounded by the column's pin section,
-   *  matching the range the field advertises as aria-valuemin/max. */
+   *  matching the range the field advertises as aria-valuemin/max.
+   *
+   *  A refused step ANNOUNCES rather than doing nothing: the arrow key is
+   *  swallowed by preventDefault, aria-valuenow does not change, and the value
+   *  in the box does not change, so silence leaves a screen reader user with no
+   *  evidence the key was even received. Same wording and same live region as
+   *  the menu's Move Left / Move Right boundary, so the two ways of reordering
+   *  a column report a blocked move identically. Announce, not showToast - a
+   *  blocked move is feedback on a keypress, not an action that happened. */
   onPosKeyDown(e: KeyboardEvent, field: string): void {
     const cur = this.visibleFields().indexOf(field) + 1;
     if (cur < 1) return;
     const { lo, hi } = this.sectionBounds(field);
-    if (e.key === 'ArrowUp')   { e.preventDefault(); if (cur > lo) this.setColumnPosition(field, String(cur - 1)); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); if (cur < hi) this.setColumnPosition(field, String(cur + 1)); return; }
+    if (e.key === 'ArrowUp')   {
+      e.preventDefault();
+      if (cur > lo) this.setColumnPosition(field, String(cur - 1));
+      else this.announceService.announce(this.colLabel(field) + ' cannot move up any further');
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (cur < hi) this.setColumnPosition(field, String(cur + 1));
+      else this.announceService.announce(this.colLabel(field) + ' cannot move down any further');
+      return;
+    }
     if (e.key === 'Home')      { e.preventDefault(); this.setColumnPosition(field, String(lo)); return; }
     if (e.key === 'End')       { e.preventDefault(); this.setColumnPosition(field, String(hi)); return; }
   }
@@ -2323,7 +2647,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const s = this.section();
     this.updateResizeGuide(field);
     const onMove = (ev: MouseEvent) => {
-      const nw = Math.max(60, w0 + (ev.clientX - startX));
+      const nw = Math.max(MIN_COL_W, w0 + (ev.clientX - startX));
       this.patchColWidth(s, field, nw);
       this.clearAutoFit(s, field); // manual resize -> autosize checkmark off
       // Mouse events fire outside Angular's zone; OnPush won't see the signal write
@@ -2351,6 +2675,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  from any other, so there was nothing to aim at while pressing arrows. */
   enterResizeMode(field: string): void {
     this.resizeModeField.set(field);
+    this._resizeSlack = null; // each resize session starts square
     this.updateResizeGuide(field);
     this.announceService.announce(`Resize mode active for ${this.colLabel(field)} column. Use arrow keys to resize, Escape to exit.`);
   }
@@ -2359,6 +2684,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const f = this.resizeModeField();
     this.resizeModeField.set(null);
     this.resizeGuideX.set(null);
+    this._resizeSlack = null;
     if (f) this.announceService.announce('Resize mode exited. ' + this.colLabel(f) + ' column width: ' + (this._colWidths[f] ?? 'auto') + 'px');
   }
 
@@ -2367,9 +2693,28 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const step = e.shiftKey ? 50 : 10;
     const s = this.section();
     const cur = this._colWidths[field] || this.measureColumnWidth(field) || 120;
-    if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); this.patchColWidth(s, field, cur + step); this.clearAutoFit(s, field); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); this.patchColWidth(s, field, Math.max(60, cur - step)); this.clearAutoFit(s, field); }
-    else return;
+    // Only this column's own slack counts, and only while the width is still
+    // the one it was recorded against.
+    const slack = this._resizeSlack;
+    let debt = slack && slack.field === field && slack.width === cur ? slack.debt : 0;
+    let next: number;
+    if (e.key === 'ArrowRight') {
+      e.preventDefault(); e.stopPropagation();
+      // Repay refused shrink first: the press that undoes a clamped shrink has
+      // to move the edge by what that shrink actually moved it, not by a full
+      // step, or the column ends up wider than it started.
+      const pay = Math.min(debt, step);
+      debt -= pay;
+      next = cur + (step - pay);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault(); e.stopPropagation();
+      const want = cur - step;
+      next = Math.max(MIN_COL_W, want);
+      debt += next - want; // 0 when nothing was clamped
+    } else return;
+    this.patchColWidth(s, field, next);
+    this.clearAutoFit(s, field);
+    this._resizeSlack = { field, width: next, debt };
     // The track only takes its new width once change detection has run, so the
     // guide is re-measured in a later task. setTimeout, not rAF: rAF does not
     // fire while the tab is hidden or throttled, which would leave the guide
@@ -2379,14 +2724,41 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
   // ── Column drag (header) ──────────────────────────────────────────────────
   onColDragStart(field: string, e: DragEvent): void {
+    // canReorder is otherwise carried only by draggable="false" on the header,
+    // which is a presentation attribute: it stops a real mouse from starting a
+    // drag, but nothing stops a programmatic drag event from reaching these
+    // handlers and reordering a section that declares reordering off. The
+    // capability is enforced here too so the rule lives in the logic, not in
+    // the markup. Guarded at all three points because each is an entry: start
+    // sets the payload, over enables the drop, drop performs it.
+    if (!this.canReorder()) return;
     this._isDragging = true;
     this.dragField.set(field);
     try { e.dataTransfer!.effectAllowed = 'move'; e.dataTransfer!.setData('text/plain', field); } catch {}
     this.announceService.announce('Grabbed ' + this.colLabel(field) + ' column for reordering');
   }
-  onColDragOver(field: string, e: DragEvent): void { e.preventDefault(); if (this.dropTarget() !== field) this.dropTarget.set(field); }
-  onColDrop(field: string, e: DragEvent): void { e.preventDefault(); this.reorderTo(this.dragField()!, field); this.dragField.set(null); this.dropTarget.set(null); }
-  onColDragEnd(): void { this._isDragging = false; this.dragField.set(null); this.dropTarget.set(null); }
+  /** Which half of a header the pointer is over. Columns run horizontally, so
+   *  the split is on x; the chooser list runs vertically and splits on y. */
+  private pointerAfter(e: DragEvent, el: EventTarget | null, axis: 'x' | 'y'): boolean {
+    const r = (el as HTMLElement | null)?.getBoundingClientRect();
+    if (!r) return false;
+    return axis === 'x' ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
+  }
+
+  onColDragOver(field: string, e: DragEvent): void {
+    if (!this.canReorder()) return; // no preventDefault -> the drop is refused by the browser
+    e.preventDefault();
+    const after = this.pointerAfter(e, e.currentTarget, 'x');
+    if (this.dropTarget() !== field) this.dropTarget.set(field);
+    if (this.dropAfter() !== after) this.dropAfter.set(after);
+  }
+  onColDrop(field: string, e: DragEvent): void {
+    if (!this.canReorder()) return;
+    e.preventDefault();
+    this.reorderTo(this.dragField()!, field, this.pointerAfter(e, e.currentTarget, 'x'));
+    this.dragField.set(null); this.dropTarget.set(null); this.dropAfter.set(false);
+  }
+  onColDragEnd(): void { this._isDragging = false; this.dragField.set(null); this.dropTarget.set(null); this.dropAfter.set(false); }
 
   // ── Chooser ───────────────────────────────────────────────────────────────
   openChooser(): void {
@@ -2495,9 +2867,18 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.showToast('Showing ' + this.visibleFields().length + ' of ' + fields.length + ' columns');
   }
   onCDragStart(field: string): void { this.cDragField.set(field); }
-  onCDragOver(field: string, e: DragEvent): void { e.preventDefault(); if (this.cDropTarget() !== field) this.cDropTarget.set(field); }
-  onCDrop(field: string, e: DragEvent): void { e.preventDefault(); this.reorderTo(this.cDragField()!, field); this.cDragField.set(null); this.cDropTarget.set(null); }
-  onCDragEnd(): void { this.cDragField.set(null); this.cDropTarget.set(null); }
+  onCDragOver(field: string, e: DragEvent): void {
+    e.preventDefault();
+    const after = this.pointerAfter(e, e.currentTarget, 'y');
+    if (this.cDropTarget() !== field) this.cDropTarget.set(field);
+    if (this.cDropAfter() !== after) this.cDropAfter.set(after);
+  }
+  onCDrop(field: string, e: DragEvent): void {
+    e.preventDefault();
+    this.reorderTo(this.cDragField()!, field, this.pointerAfter(e, e.currentTarget, 'y'));
+    this.cDragField.set(null); this.cDropTarget.set(null); this.cDropAfter.set(false);
+  }
+  onCDragEnd(): void { this.cDragField.set(null); this.cDropTarget.set(null); this.cDropAfter.set(false); }
 
   // ── Filter ────────────────────────────────────────────────────────────────
   openFilter(field: string, triggerEl?: HTMLElement): void {
@@ -3033,7 +3414,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       // Write through to the loaded window so the edit survives re-render.
       this.ds.patchRow(rowId, field, draft);
       const changed = draft !== (this._original[k] ?? '');
-      this.dirtyCells.update(m => {
+      this.updateDirty(m => {
         const n = { ...m };
         if (changed) n[k] = true; else delete n[k];
         return n;
@@ -3043,11 +3424,11 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       return;
     }
     {
-      this.rows.set(this.rows().map(r => r.id === rowId ? { ...r, [field]: draft } as CscRow : r));
+      this.setRows(this.rows().map(r => r.id === rowId ? { ...r, [field]: draft } as CscRow : r));
       // Marker clears when the value is put back to what it originally was -
       // nothing actually changed, so flagging it would be misleading.
       const changed = draft !== (this._original[k] ?? '');
-      this.dirtyCells.update(m => {
+      this.updateDirty(m => {
         const n = { ...m };
         if (changed) n[k] = true; else delete n[k];
         return n;
@@ -3284,7 +3665,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (this.isServerMode()) {
       this.ds.prependRow({ ...row, priority: 'Medium', owner: 'Unassigned', ownerEmail: '', revenue: 0, childCount: 0 });
     } else {
-      this.rows.set([row, ...this.rows()]);
+      this.setRows([row, ...this.rows()]);
     }
     this.nextSeq.set(seq+1); this.page.set(0);
     this.addOpen.set(false); this.addDraft.set(null); this.addError.set(null);
@@ -3338,7 +3719,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     }
     const n = ids.length;
     if (this.isServerMode()) this.ds.removeRows(ids);
-    else this.rows.set(this.rows().filter(r => !ids.includes(r.id)));
+    else this.setRows(this.rows().filter(r => !ids.includes(r.id)));
     this.dropFromSelections(ids);
     this.bulkDeleteOpen.set(false);
     if (ids.some(id => this.editingCell()?.startsWith(id + '::'))) { this.editingCell.set(null); this.draft.set(''); }
@@ -3357,7 +3738,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const selIds = Object.keys(this.selected()).filter(id => this.selected()[id]);
     const n = selIds.length;
     if (this.isServerMode()) this.ds.removeRows(selIds);
-    else this.rows.set(this.rows().filter(r => !selIds.includes(r.id)));
+    else this.setRows(this.rows().filter(r => !selIds.includes(r.id)));
     this.dropFromSelections(selIds);
     this.bulkDeleteOpen.set(false);
     // Clear only the DELETED rows' edit state - other rows mid-edit are untouched.
@@ -3379,7 +3760,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (visIds.length > 1) { if (pos >= 0 && pos+1 < visIds.length) nextFocus = visIds[pos+1]; else if (pos > 1) nextFocus = visIds[pos-1]; }
     const stillEditing = !!this.editingCell()?.startsWith(id + '::');
     if (this.isServerMode()) this.ds.removeRows([id]);
-    else this.rows.set(this.rows().filter(r => r.id !== id));
+    else this.setRows(this.rows().filter(r => r.id !== id));
     this.dropFromSelections([id]); this.deleteId.set(null);
     if (stillEditing) {
       this.editingCell.set(null); this.draft.set('');
@@ -3395,7 +3776,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const selIds = Object.keys(this.selected()).filter(id => this.selected()[id]);
     if (!selIds.length) return;
     if (this.isServerMode()) this.ds.removeRows(selIds);
-    else this.rows.set(this.rows().filter(r => !selIds.includes(r.id)));
+    else this.setRows(this.rows().filter(r => !selIds.includes(r.id)));
     this.dropFromSelections(selIds);
     this.showToast(selIds.length + ' records deleted');
   }
@@ -3493,9 +3874,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  element actually scrolls — .csc-main only becomes a scroller when a host
    *  page constrains its height, otherwise the document scrolls. */
   private _onScroll = (): void => {
+    // Capture phase, so this also catches .csc-grid-scroll's own scrolling,
+    // which does not bubble.
+    this.reflowTip();
     if (this.virtualOn()) { this.measureViewport(); this.cdr.markForCheck(); }
     this.maybeLoadMore();
   };
+
+  /** A resize changes both the viewport bounds the flip is measured against and
+   *  the tooltip's own wrapped height. */
+  private _onWinResize = (): void => { this.reflowTip(); };
 
   private maybeLoadMore(): void {
     if (!this.isServerMode() || this.ds.mode() !== 'infinite') return;
