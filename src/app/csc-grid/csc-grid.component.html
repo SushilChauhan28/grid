@@ -245,12 +245,27 @@
         }
 
       <!-- Grid scroll area -->
-      <div class="csc-grid-scroll" [class.csc-hidden]="noColumnsVisible()">
+      <!-- The column-drag drop surface lives here, not on the header row.
+           dragover bubbles, so this still sees every move over a header cell
+           and the controls stacked on it - and it additionally covers the two
+           places the row itself does not reach: the trailing space when the
+           columns are narrower than the grid, and the sliver between the last
+           column and the scroll edge when they are wider. A vertical guard
+           keeps it to the header band. -->
+      <div class="csc-grid-scroll" [class.csc-hidden]="noColumnsVisible()"
+           (dragover)="onHeaderDragOver($event)"
+           (drop)="onHeaderDrop($event)">
         <div class="csc-grid-inner">
           <!-- Drag guide: spans header + rows so the drop position reads against
                the data, not just the header strip. -->
           @if (resizeGuideX() !== null) {
             <div class="csc-resize-guide" aria-hidden="true" [style.left.px]="resizeGuideX()"></div>
+          }
+          <!-- Column-drag insertion line. Sits on the boundary the column would
+               land on, including the one past the final column, which is the
+               position a target-only drop model could not express. -->
+          @if (dragGuideX() !== null) {
+            <div class="csc-drag-guide" aria-hidden="true" [style.left.px]="dragGuideX()"></div>
           }
           <!-- tabindex=-1 makes the grid itself a last-resort focus target: if
                every column is hidden there is no cell left to land on, and
@@ -266,6 +281,11 @@
                (keydown)="onGridKeyDown($event)">
 
             <!-- Header row -->
+            <!-- One drop surface for the whole header. dragover bubbles, so this
+                 catches moves over a cell, over the buttons and resize handle
+                 stacked on top of one, and over the row's own trailing space -
+                 which is where a per-column listener had nothing to say and the
+                 slot after the last column could not be reached. -->
             <div role="row" aria-rowindex="1" class="csc-header-row" [style.grid-template-columns]="gridCols()">
 
               <!-- One loop for every column, action or data. Ordering, pinning
@@ -292,8 +312,6 @@
                      [style.opacity]="col.dragOpacity"
                      [style.box-shadow]="col.dropShadow"
                      (dragstart)="onColDragStart(col.field, $event)"
-                     (dragover)="onColDragOver(col.field, $event)"
-                     (drop)="onColDrop(col.field, $event)"
                      (dragend)="onColDragEnd()"
                      [attr.aria-description]="expandColHeaderDesc()"
                      (focus)="onCellFocus('header', col.field)">
@@ -346,8 +364,6 @@
                    [style.opacity]="col.dragOpacity"
                    [style.box-shadow]="col.dropShadow"
                    (dragstart)="onColDragStart(col.field, $event)"
-                   (dragover)="onColDragOver(col.field, $event)"
-                   (drop)="onColDrop(col.field, $event)"
                    (dragend)="onColDragEnd()"
                    (focus)="onLeadHeaderFocus()">
                 <div role="checkbox"
@@ -385,8 +401,6 @@
                      [style.opacity]="col.dragOpacity"
                      [style.box-shadow]="col.dropShadow"
                      (dragstart)="onColDragStart(col.field, $event)"
-                     (dragover)="onColDragOver(col.field, $event)"
-                     (drop)="onColDrop(col.field, $event)"
                      (dragend)="onColDragEnd()"
                      [attr.aria-description]="deleteColHeaderDesc()"
                      (focus)="onCellFocus('header', col.field)">
@@ -434,8 +448,6 @@
                      (focus)="onCellFocus('header', col.field); onTipEnter($any($event.currentTarget))"
                      (click)="!_isDragging && sortBy(col.field, $event.shiftKey)"
                      (dragstart)="onColDragStart(col.field, $event)"
-                     (dragover)="onColDragOver(col.field, $event)"
-                     (drop)="onColDrop(col.field, $event)"
                      (dragend)="onColDragEnd()">
 
                   <div class="csc-header-content">

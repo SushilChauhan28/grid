@@ -342,6 +342,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   dragField   = signal<string | null>(null);
   dropTarget  = signal<string | null>(null);
   dropAfter   = signal(false);
+  /** x of the insertion line during a header drag, in .csc-grid-inner
+   *  coordinates. null when there is no drag, or when the pointer is somewhere
+   *  the dragged column may not go. */
+  dragGuideX  = signal<number | null>(null);
   filterField = signal<string | null>(null);
   filterX     = signal(0);
   filterY     = signal(0);
@@ -822,9 +826,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
           // header path failed silently, because a cell with no drop handler
           // simply swallows the drop.
           draggable: canReorder, dragOpacity: this.dragField() === field ? 0.4 : 1,
-          dropShadow: canReorder && this.dropTarget() === field
-            && this.dragField() && this.dragField() !== field
-            ? (this.dropAfter() ? 'inset -3px 0 0 0 ' + a : 'inset 3px 0 0 0 ' + a) : 'none',
+          // The insertion LINE is the indicator now; a second edge highlight on
+          // the target cell said "this column" when the question is "which
+          // boundary", and it could not mark the one past the last column.
+          dropShadow: 'none',
           isRowHeader: false, isResizing: false,
           resizerAriaLabel: '', resizerAriaValueNow: '', resizerAriaMin: '', resizerAriaMax: '',
         } satisfies ColumnView;
@@ -837,7 +842,6 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       const isDesc = srv ? srv.dir === 'desc' : (sf === field && sd === 'desc');
       const sortLevel = srv && srv.of > 1 ? String(srv.level) : null;
       const sActive = isAsc || isDesc, filterActive = !!(filters[field]?.length);
-      const isDropTarget = canReorder && this.dropTarget() === field && this.dragField() && this.dragField() !== field;
       const isActiveCell = ark === 'header' && ack === field;
       const isPinned = !!pinned[field];
       // aria-label for column header: include sort + filter state
@@ -873,8 +877,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
         showMenu: this.canMenu(), resizable,
         showEditableIcon: this.canEdit() && !this.isSimple() && this.isFieldEditable(field),
         draggable: canReorder, dragOpacity: this.dragField() === field ? 0.4 : 1,
-        dropShadow: isDropTarget
-          ? (this.dropAfter() ? 'inset -3px 0 0 0 ' + a : 'inset 3px 0 0 0 ' + a) : 'none',
+        dropShadow: 'none',
         isRowHeader: field === rhf,
         isResizing: this.resizeModeField() === field,
         // ARIA separator pattern for the resize grip (role="separator" applied in template)
@@ -1605,7 +1608,25 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  appears if the text is still clipped and the pointer is still here when it
    *  fires. */
   onTipEnter(trigger: HTMLElement): void {
-    if (this._tipHideTimer) { clearTimeout(this._tipHideTimer); this._tipHideTimer = null; }
+    // Only the source the visible tooltip BELONGS TO may cancel a pending
+    // dismissal. Cancelling it for any incoming trigger stranded the tooltip:
+    // leaving a truncated cell schedules the hide, the next cell's focus
+    // cancelled it, and then this handler returned early because that cell is
+    // not truncated - so nothing was ever left to take the old one down. Moving
+    // to a different source dismisses it at once instead, which is also what
+    // arrowing across a row should do.
+    //
+    // `contains` rather than ===: the trigger is the cell on focus but the
+    // label span on hover, so focus moving within one cell is still the same
+    // source and must not count as leaving it.
+    const anchor = this._tipAnchor;
+    const sameSource = !!anchor && (anchor === trigger || anchor.contains(trigger));
+    if (sameSource) {
+      if (this._tipHideTimer) { clearTimeout(this._tipHideTimer); this._tipHideTimer = null; }
+    } else if (this.truncTip()) {
+      this.hideTip();
+      this.cdr.markForCheck();
+    }
     if (this._tipTimer) clearTimeout(this._tipTimer);
     this._tipSource = trigger;
     this._tipTimer = setTimeout(() => {
@@ -2737,28 +2758,125 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     try { e.dataTransfer!.effectAllowed = 'move'; e.dataTransfer!.setData('text/plain', field); } catch {}
     this.announceService.announce('Grabbed ' + this.colLabel(field) + ' column for reordering');
   }
-  /** Which half of a header the pointer is over. Columns run horizontally, so
-   *  the split is on x; the chooser list runs vertically and splits on y. */
+  /** Which half of a chooser row the pointer is over. The header works from the
+   *  pointer against a whole section instead (see resolveInsertion) because it
+   *  needs the zones before the first column and after the last one; a vertical
+   *  list has no equivalent dead space to reach. */
   private pointerAfter(e: DragEvent, el: EventTarget | null, axis: 'x' | 'y'): boolean {
     const r = (el as HTMLElement | null)?.getBoundingClientRect();
     if (!r) return false;
     return axis === 'x' ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
   }
 
-  onColDragOver(field: string, e: DragEvent): void {
-    if (!this.canReorder()) return; // no preventDefault -> the drop is refused by the browser
-    e.preventDefault();
-    const after = this.pointerAfter(e, e.currentTarget, 'x');
-    if (this.dropTarget() !== field) this.dropTarget.set(field);
-    if (this.dropAfter() !== after) this.dropAfter.set(after);
+  /**
+   * Where would the dragged column land if it were dropped at this pointer x?
+   *
+   * Resolved against the SECTION the dragged column belongs to, never against
+   * the header as a whole: the three frozen blocks are separate ordering spaces
+   * and a drop cannot cross them. Returns null when the pointer is over another
+   * section, which is what makes the drag read as refused rather than silently
+   * snapping somewhere legal.
+   *
+   * The two outer zones are the point of this. A per-column dragover can only
+   * ever say "before or after THIS header", so the slot past the final column
+   * had no way of being named - and at the trailing edge there is often nothing
+   * under the pointer to ask: the last elements there are the resize handle and
+   * then the scroll container. Working from the pointer against the section's
+   * own rects means the leading and trailing zones exist whether or not a DOM
+   * node happens to sit under the cursor.
+   */
+  private resolveInsertion(x: number, from: string): { field: string; after: boolean } | null {
+    const sec = this.sectionOf(from);
+    const vis = this.visibleFields();
+    const mine: { f: string; l: number; r: number }[] = [];
+    let overOther = false;
+    for (const f of vis) {
+      const el = document.getElementById('gc-header-' + f);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (this.sectionOf(f) === sec) mine.push({ f, l: r.left, r: r.right });
+      else if (x >= r.left && x < r.right) overOther = true;
+    }
+    if (!mine.length) return null;
+    // Pointer is inside a different frozen block - refuse rather than clamp.
+    if (overOther) return null;
+    const first = mine[0], last = mine[mine.length - 1];
+    if (x < first.l) return { field: first.f, after: false };
+    if (x >= last.r) return { field: last.f, after: true };
+    for (const m of mine) {
+      if (x >= m.l && x < m.r) return { field: m.f, after: x >= (m.l + m.r) / 2 };
+    }
+    // Between two of our own columns (a gap, or a column scrolled under a
+    // frozen block): fall to the nearest boundary on the left.
+    const before = mine.filter(m => m.r <= x).pop();
+    return before ? { field: before.f, after: true } : { field: first.f, after: false };
   }
-  onColDrop(field: string, e: DragEvent): void {
+
+  /** Draws the insertion line on the resolved boundary, in .csc-grid-inner
+   *  coordinates so it stays put while the scroll container moves under it. */
+  private showInsertGuide(ins: { field: string; after: boolean } | null): void {
+    const inner = this.hostEl.nativeElement.querySelector('.csc-grid-inner');
+    const el = ins && document.getElementById('gc-header-' + ins.field);
+    if (!inner || !el) { this.dragGuideX.set(null); return; }
+    const r = el.getBoundingClientRect(), ir = inner.getBoundingClientRect();
+    this.dragGuideX.set((ins!.after ? r.right : r.left) - ir.left);
+  }
+
+  /** The drop surface is the whole scroll container, so this keeps reordering
+   *  to the header strip rather than letting a drop anywhere over the data
+   *  count as one. */
+  private inHeaderBand(y: number): boolean {
+    const row = this.hostEl.nativeElement.querySelector('.csc-header-row');
+    if (!row) return false;
+    const r = row.getBoundingClientRect();
+    return y >= r.top && y <= r.bottom;
+  }
+
+  /**
+   * One dragover listener on the scroll container, not one per column.
+   *
+   * dragover bubbles, so this sees every move over a header cell, over the
+   * controls inside one (the sort, filter and menu buttons and the resize
+   * handle all sit on top of the cell), over the header row's empty trailing
+   * space when the columns do not fill the grid, and over the sliver past the
+   * last column when they overflow it. Those last two are exactly where a
+   * per-cell listener went silent, and they are the only places the slot after
+   * the final column can be pointed at.
+   */
+  onHeaderDragOver(e: DragEvent): void {
     if (!this.canReorder()) return;
+    const from = this.dragField();
+    if (!from || !this.inHeaderBand(e.clientY)) { this.dragGuideX.set(null); return; }
+    const ins = this.resolveInsertion(e.clientX, from);
+    if (!ins) {
+      // No preventDefault: the browser shows a no-drop cursor and will not
+      // deliver a drop here.
+      this.dropTarget.set(null); this.dragGuideX.set(null);
+      return;
+    }
     e.preventDefault();
-    this.reorderTo(this.dragField()!, field, this.pointerAfter(e, e.currentTarget, 'x'));
-    this.dragField.set(null); this.dropTarget.set(null); this.dropAfter.set(false);
+    if (this.dropTarget() !== ins.field) this.dropTarget.set(ins.field);
+    if (this.dropAfter() !== ins.after) this.dropAfter.set(ins.after);
+    this.showInsertGuide(ins);
   }
-  onColDragEnd(): void { this._isDragging = false; this.dragField.set(null); this.dropTarget.set(null); this.dropAfter.set(false); }
+
+  onHeaderDrop(e: DragEvent): void {
+    if (!this.canReorder()) return;
+    const from = this.dragField();
+    if (!from || !this.inHeaderBand(e.clientY)) return;
+    e.preventDefault();
+    const ins = this.resolveInsertion(e.clientX, from);
+    this.clearHeaderDrag();
+    if (ins) this.reorderTo(from, ins.field, ins.after);
+  }
+
+  private clearHeaderDrag(): void {
+    this._isDragging = false;
+    this.dragField.set(null); this.dropTarget.set(null);
+    this.dropAfter.set(false); this.dragGuideX.set(null);
+  }
+
+  onColDragEnd(): void { this.clearHeaderDrag(); }
 
   // ── Chooser ───────────────────────────────────────────────────────────────
   openChooser(): void {

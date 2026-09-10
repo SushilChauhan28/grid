@@ -311,6 +311,15 @@
   position:absolute; top:0; bottom:0; width:2px; background:#008996;
   pointer-events:none; z-index:5;
 }
+/* Same idea as the resize guide, and deliberately the same 2px: it marks a
+   boundary, not a column, so it must not look like a selected cell or shift
+   anything around it. pointer-events:none keeps it out of the drag's own hit
+   testing - a line under the cursor would swallow the dragover it exists to
+   report. z-index 6 clears the frozen header cells, which reach 5 and above. */
+.csc-drag-guide {
+  position:absolute; top:0; bottom:0; width:2px; background:#008996;
+  pointer-events:none; z-index:6;
+}
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
 .csc-btn-outline { cursor:pointer; font-size:0.8125rem; color:#5b6b76; border:1px solid #D1D3D4; border-radius:3px; padding:8px 16px; background:transparent; font-family:inherit; }
