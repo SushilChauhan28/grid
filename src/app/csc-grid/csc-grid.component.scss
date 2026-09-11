@@ -17,6 +17,17 @@
 
 /* ── Page header ───────────────────────────────────────────────────── */
 .csc-page-header   { padding:22px 32px 0 32px; }
+/* The sections-panel toggle. Sits above the title rather than inline with it so
+   collapsing does not reflow the heading, and stays put in both states - the
+   button is the only route back once the panel is gone. */
+.csc-sidebar-toggle {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:28px; min-height:28px; margin-bottom:6px; padding:0;
+  border:1px solid #D1D3D4; border-radius:3px; background:#fff;
+  cursor:pointer; font:inherit;
+}
+.csc-sidebar-toggle:hover { background:#f0f8fa; }
+.csc-sidebar-toggle:focus-visible { outline:2px solid #008996; outline-offset:2px; }
 .csc-page-title    { font-size:1.625rem; font-weight:700; color:#013a4f; }
 .csc-page-subtitle { font-size:0.875rem; color:#5b6b76; margin-top:6px; max-width:760px; }
 .csc-page-tabs     { display:flex; gap:26px; margin-top:18px; border-bottom:1px solid #D1D3D4; }
@@ -63,6 +74,16 @@
    lower right, following the corner it sits on instead of pointing away from
    the grid. */
 .csc-editable-badge svg { transform:scaleX(-1); }
+/* The button form of the badge. Native buttons arrive with a border, a grey
+   background and padding, all of which would turn the bare glyph into a boxed
+   control and break the "mark ON the grid" reading. Everything else about it
+   stays a button, including the focus ring, which it needs now that it is a
+   tab stop. */
+.csc-editable-badge-btn {
+  border:0; padding:0; background:transparent; cursor:pointer; font:inherit;
+  line-height:0;
+}
+.csc-editable-badge-btn:focus-visible { outline:2px solid #008996; outline-offset:2px; border-radius:3px; }
 
 /* ── Toolbar ───────────────────────────────────────────────────────── */
 .csc-toolbar      { display:flex; align-items:center; gap:2px; padding:8px 14px; border-bottom:1px solid #e6e8e9; flex-wrap:wrap; }
@@ -753,6 +774,14 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
 .csc-data-cell.csc-cell-editable:hover  .csc-cell-edit-btn,
 .csc-data-cell.csc-cell-editable:focus-within .csc-cell-edit-btn,
 .csc-cell-edit-btn:focus-visible { display: inline-flex; animation: cscIndicatorIn .22s ease; }
+/* Simplified Editable's brief "here is what else you can edit" flash. Five
+   classes so it outranks the :hover rule above rather than racing it on source
+   order, and it reuses the same fade so a revealed icon looks identical to a
+   hovered one. Covers the combo chevron too - that button carries
+   .csc-cell-edit-btn as well. */
+.csc-grid-inner.csc-reveal-edits .csc-data-cell.csc-cell-editable .csc-cell-edit-btn {
+  display: inline-flex; animation: cscIndicatorIn .22s ease;
+}
 @keyframes cscIndicatorIn { from { opacity: 0; } to { opacity: 1; } }
 .csc-cell-edit-btn:hover { background: #EBF6FD; }
 /* Sits above the dirty-corner marker, which is decorative. */

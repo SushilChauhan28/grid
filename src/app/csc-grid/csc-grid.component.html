@@ -13,7 +13,13 @@
 <div class="csc-shell">
 
   <!-- Sidebar -->
-  <nav class="csc-sidebar" aria-label="Grid demo sections">
+  <!-- [hidden] rather than @if: the element has to stay in the DOM for the
+       toggle's aria-controls to point at something real. hidden gives it
+       display:none, which is what takes the links out of the tab order and out
+       of the accessibility tree - a width:0 panel would keep six invisible tab
+       stops. -->
+  <nav class="csc-sidebar" id="csc-sidebar-nav" aria-label="Grid demo sections"
+       [hidden]="!sidebarOpen()">
     @for (nav of navItems(); track nav.key) {
       <div class="csc-navlink"
            role="button" tabindex="0"
@@ -35,6 +41,19 @@
 
     <!-- Page header -->
     <div class="csc-page-header">
+      <!-- Always rendered, in both states: it is the only way back once the
+           panel is hidden, so it can never be the thing that disappears. -->
+      <button type="button" id="csc-sidebar-toggle" class="csc-sidebar-toggle"
+              [attr.aria-expanded]="sidebarOpen()"
+              aria-controls="csc-sidebar-nav"
+              [attr.aria-label]="sidebarOpen() ? 'Hide sections panel (Alt+M)' : 'Show sections panel (Alt+M)'"
+              [attr.title]="sidebarOpen() ? 'Hide sections panel (Alt+M)' : 'Show sections panel (Alt+M)'"
+              [style.color]="accent()"
+              (click)="toggleSidebar()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M2 4h12M2 8h12M2 12h12"/>
+        </svg>
+      </button>
       <div class="csc-page-title">{{ sectionMeta().title }}</div>
       <div class="csc-page-subtitle">{{ sectionMeta().subtitle }}</div>
       <div class="csc-page-tabs">
@@ -233,15 +252,34 @@
              grid's own accessible name. -->
         @if (canEdit()) {
           <!-- accent() is the same colour the per-cell edit action uses, so the
-               two pencils read as one idea at two scales. -->
-          <span class="csc-editable-badge" aria-hidden="true" [style.color]="accent()"
-                title="Editable grid — inline editing enabled">
-            <!-- stroke-width drops to 1.2: at 22px the 1.6 that suited a 13px
-                 glyph renders as a heavy blob. -->
-            <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
-              <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
-            </svg>
-          </span>
+               two pencils read as one idea at two scales.
+               stroke-width drops to 1.2: at 22px the 1.6 that suited a 13px
+               glyph renders as a heavy blob. -->
+          @if (isSimple()) {
+            <!-- Simplified Editable is the one variant whose headers carry no
+                 pencil, so this badge is the only standing sign that anything
+                 here can be edited. Here it is a real control: it flashes the
+                 per-cell affordances and names the editable columns. A button,
+                 not a span with a click handler - once it does something it has
+                 to be reachable and operable by keyboard, which also gets Enter
+                 and Space for free. -->
+            <button type="button" class="csc-editable-badge csc-editable-badge-btn"
+                    [style.color]="accent()"
+                    title="Show which fields are editable"
+                    aria-label="Show which fields are editable"
+                    (click)="revealEditableFields()">
+              <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
+                <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
+              </svg>
+            </button>
+          } @else {
+            <span class="csc-editable-badge" aria-hidden="true" [style.color]="accent()"
+                  title="Editable grid — inline editing enabled">
+              <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+                <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
+              </svg>
+            </span>
+          }
         }
 
       <!-- Grid scroll area -->
@@ -255,7 +293,7 @@
       <div class="csc-grid-scroll" [class.csc-hidden]="noColumnsVisible()"
            (dragover)="onHeaderDragOver($event)"
            (drop)="onHeaderDrop($event)">
-        <div class="csc-grid-inner">
+        <div class="csc-grid-inner" [class.csc-reveal-edits]="revealEdits()">
           <!-- Drag guide: spans header + rows so the drop position reads against
                the data, not just the header strip. -->
           @if (resizeGuideX() !== null) {

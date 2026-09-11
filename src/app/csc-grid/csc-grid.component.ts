@@ -229,6 +229,73 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   editingCount = computed(() => this.editingCell() ? 1 : 0);
   expanded    = signal<Record<string, boolean>>({});
 
+  /**
+   * Simplified Editable only: the corner pencil briefly shows every cell's edit
+   * affordance.
+   *
+   * That variant strips the pencil from the column headers on purpose, so the
+   * only sign a field can be edited is a per-cell icon that appears on hover -
+   * which a keyboard user never sees and a mouse user only finds one cell at a
+   * time. The badge on the grid's corner already claims "this grid is editable";
+   * activating it now shows WHICH cells, for two seconds, and says the same
+   * thing out loud.
+   *
+   * The reveal is purely visual: the per-cell icons stay tabindex=-1 and
+   * aria-hidden, so nothing new becomes reachable and the editable state still
+   * travels to a screen reader through the announcement and the cells' own
+   * descriptions.
+   */
+  /**
+   * Sections panel open/closed. A plain signal, which is all "remember it for
+   * the session" needs here: this component is never torn down between
+   * sections - setSection only swaps state - so the choice survives every tab
+   * switch on its own. Nothing is written to storage, so it does not outlive
+   * the page, which is the scope that was asked for.
+   */
+  sidebarOpen = signal(true);
+
+  toggleSidebar(): void {
+    const open = !this.sidebarOpen();
+    // Collapsing while focus sits on a section link would drop focus to <body>
+    // and restart tabbing from the top of the document. The toggle is the one
+    // control guaranteed to still be there, and it is where the user just acted.
+    const nav = this.hostEl.nativeElement.querySelector('.csc-sidebar');
+    const focusWasInNav = !open && !!nav && nav.contains(document.activeElement);
+    this.sidebarOpen.set(open);
+    this.announceService.announce(open ? 'Sections panel shown' : 'Sections panel hidden');
+    if (focusWasInNav) this.focusAfterRender('csc-sidebar-toggle');
+  }
+
+  revealEdits = signal(false);
+  private _revealTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly revealMs = 2000;
+
+  /** Restarts the window rather than stacking timers, so a second edit does not
+   *  inherit whatever was left of the first one's two seconds. */
+  /** Corner badge activation - mouse click or, because it is a real button in
+   *  this variant, Enter and Space. */
+  revealEditableFields(): void {
+    this.flashEditAffordances();
+    const names = this.visibleFields()
+      .filter(f => !this.actionKindOf(f) && this.isFieldEditable(f))
+      .map(f => this.colLabel(f));
+    // The badge is a property of the GRID, not of one column, so the useful
+    // thing to say is which columns it applies to.
+    this.announceService.announce(names.length
+      ? 'Editable columns: ' + names.join(', ')
+      : 'No editable columns are currently shown');
+  }
+
+  private flashEditAffordances(): void {
+    if (this._revealTimer) clearTimeout(this._revealTimer);
+    this.revealEdits.set(true);
+    this._revealTimer = setTimeout(() => {
+      this._revealTimer = null;
+      this.revealEdits.set(false);
+      this.cdr.markForCheck();
+    }, this.revealMs);
+  }
+
   // ── Text size ───────────────────────────────────────────────────────────
   /** Root font size in px. Every dimension in the stylesheet is expressed in
    *  rem, so changing this scales text AND the boxes around it - no clipping. */
@@ -1435,6 +1502,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     { keys: ['Ctrl','←','→'], desc: 'Move column (on a header cell)' },
     { keys: ['Shift','R'],     desc: 'Enter column resize mode (on a header cell)' },
     { keys: ['Shift','M'],     desc: 'Open column menu (on a header cell)' },
+    { keys: ['Alt','M'],       desc: 'Show / hide the sections panel (anywhere on the page)' },
     { keys: ['←','→'],        desc: 'Resize column (in resize mode), 10px per press' },
     { keys: ['Shift','←','→'], desc: 'Resize column faster, 50px per press' },
     { keys: ['Esc'],           desc: 'Cancel a cell edit / close dialog / exit resize mode' },
@@ -1514,6 +1582,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   ngAfterViewInit(): void {
     this.scheduleDefaultAutosize(this.section());
     this._docKeyDown = (e: KeyboardEvent) => {
+      // Alt+M: show/hide the sections panel. Deliberately not a bare key like
+      // [ or ] - those are typeable, and this listener is on the document, so a
+      // bare letter would fire while the user was typing in the search box or a
+      // cell editor. Alt+M is claimed by nothing else in the grid (Shift+M
+      // opens the column menu) and works wherever focus happens to be.
+      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        this.toggleSidebar();
+        return;
+      }
       if (e.key === 'Escape') {
         // First in the chain: a tooltip has to be dismissible on its own
         // without tearing down whatever is behind it (WCAG 1.4.13). A second
@@ -1571,6 +1649,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.removeFilterScrollListener();
     this.removeComboScrollListener();
     clearTimeout(this._toastTimer);
+    if (this._revealTimer) clearTimeout(this._revealTimer);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
