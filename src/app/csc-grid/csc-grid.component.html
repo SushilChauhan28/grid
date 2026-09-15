@@ -255,7 +255,13 @@
              pencil saying a weaker version of the same thing. The two variants
              that keep it need it: Simplified has no header pencils at all, and
              All features carries it as the grid-level statement. -->
-        @if (canEdit() && !isEditable()) {
+        <!-- Not in Editable: its headers already mark every editable column, so
+             a corner pencil was a second, weaker version of the same statement.
+             Not in Simplified Editable (Selective) either, and for the opposite
+             reason - there the editable cells are painted permanently, so a
+             badge saying "this grid can be edited" adds nothing the grid is not
+             already saying on every one of those cells. -->
+        @if (canEdit() && !isEditable() && !isSelectiveReveal()) {
           <!-- accent() is the same colour the per-cell edit action uses, so the
                two pencils read as one idea at two scales.
                stroke-width drops to 1.2: at 22px the 1.6 that suited a 13px
@@ -268,16 +274,10 @@
                  not a span with a click handler - once it does something it has
                  to be reachable and operable by keyboard, which also gets Enter
                  and Space for free. -->
-            <!-- The MANUAL half of the discovery cue. In the selective variant
-                 the same window also opens by itself on page entry; this is the
-                 on-demand route, and the only one that announces. Disabled when
-                 the page holds no editable value cells, so it cannot be pressed
-                 into doing nothing. -->
             <button type="button" class="csc-editable-badge csc-editable-badge-btn"
                     [style.color]="accent()"
-                    [disabled]="isSelectiveReveal() && revealBadgeDisabled()"
-                    [attr.title]="isSelectiveReveal() && revealBadgeDisabled() ? 'No editable cells on this page' : 'Show which cells are editable'"
-                    [attr.aria-label]="isSelectiveReveal() && revealBadgeDisabled() ? 'No editable cells on this page' : 'Show which cells are editable'"
+                    title="Show which fields are editable"
+                    aria-label="Show which fields are editable"
                     (click)="revealEditableFields()">
               <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
                 <path d="M11.5 2.5l2 2-7.5 7.5-2.7.7.7-2.7z"/>
@@ -304,12 +304,14 @@
       <div class="csc-grid-scroll" [class.csc-hidden]="noColumnsVisible()"
            (dragover)="onHeaderDragOver($event)"
            (drop)="onHeaderDrop($event)">
-        <!-- csc-reveal-edits opens the window; csc-reveal-selective says to
-             paint it as the darker "selected" state rather than Simplified's
-             plain icon flash. Neither says WHICH cells - that stays on the
-             cells themselves, from isCellEditable(). -->
+        <!-- Two different things. csc-reveal-edits is Simplified's two-second
+             flash and is timer-driven. csc-reveal-selective is NOT a window at
+             all - it is on for as long as the section is, because in that
+             variant an editable cell is meant to look editable permanently.
+             Neither says WHICH cells: that stays on the cells themselves, from
+             isCellEditable(row, field). -->
         <div class="csc-grid-inner" [class.csc-reveal-edits]="revealEdits()"
-             [class.csc-reveal-selective]="revealEdits() && isSelectiveReveal()">
+             [class.csc-reveal-selective]="isSelectiveReveal()">
           <!-- Drag guide: spans header + rows so the drop position reads against
                the data, not just the header strip. -->
           @if (resizeGuideX() !== null) {

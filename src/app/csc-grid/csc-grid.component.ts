@@ -303,61 +303,24 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   private _revealTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly revealMs = 2000;
 
-  /** Editable VALUE cells on the page right now. Action columns are excluded -
-   *  they hold controls, not values - which is also what the badge's enabled
-   *  state is keyed off. */
-  editableCellCount = computed(() => {
-    const fields = this.visibleFields().filter(f => !this.actionKindOf(f));
-    return this.viewRows().reduce(
-      (n, r) => n + fields.filter(f => this.isCellEditable(r.id, f)).length, 0);
-  });
-  /** Nothing to show, so the badge says so by being disabled rather than by
-   *  doing nothing when pressed. */
-  revealBadgeDisabled = computed(() => this.editableCellCount() === 0);
-
-  /** Corner badge - the MANUAL half of the discovery cue. Same window, same
-   *  timer and same editability source as the automatic one below; only the
-   *  trigger differs.
+  /** Corner badge, Simplified Editable only. That variant's headers carry no
+   *  pencil, so a brief flash is how it answers "what can I edit here". The
+   *  selective variant does not use this: its editable cells are painted
+   *  permanently, so there is nothing for a flash to reveal.
    *
    *  Purely visual: nothing enters edit mode, no value changes, no combo opens,
    *  and focus stays on the badge. */
   revealEditableFields(): void {
     this.flashEditAffordances();
-    const n = this.editableCellCount();
-    // A count, not a roll-call. Naming every highlighted cell would be a long
-    // unusable announcement, and the per-cell fact is already on each cell's
-    // own aria-description for anyone who arrows onto it.
-    this.announceService.announce(
-      n ? n + ' editable cells on this page' : 'No editable cells on this page');
+    const names = this.visibleFields()
+      .filter(f => !this.actionKindOf(f) && this.isFieldEditable(f))
+      .map(f => this.colLabel(f));
+    // The badge is a property of the GRID, not of one column, so the useful
+    // thing to say is which columns it applies to.
+    this.announceService.announce(names.length
+      ? 'Editable columns: ' + names.join(', ')
+      : 'No editable columns are currently shown');
   }
-
-  /**
-   * The AUTOMATIC half: entering the section or changing page flashes the
-   * editable cells once, so a user arriving on a page can see what it offers
-   * without hunting.
-   *
-   * An effect with exactly three dependencies - section, page, page size - is
-   * what keeps this to real data-view transitions. Change detection does not
-   * re-run it; hover, focus, arrow keys and mouse movement touch none of these
-   * signals; sorting re-orders the same page and touches none of them either.
-   * The body is untracked so that reading the rows cannot enrol the whole
-   * dataset as a dependency, which would flash the grid on every edit.
-   *
-   * Deliberately silent. It fires on every page turn, and a page turn already
-   * announces "Showing page 2 of 1000" - adding a second announcement to that
-   * would be noise. The badge is the on-demand, announced route.
-   */
-  private readonly autoRevealOnPageEntry = effect(() => {
-    const section = this.section();
-    this.page();
-    this.pageSize();
-    if (section !== 'simple-selective') return;
-    untracked(() => {
-      if (!this.editableCellCount()) return;
-      this.flashEditAffordances();
-      this.cdr.markForCheck();
-    });
-  });
 
   /** Restarts the window rather than stacking timers, so a second trigger does
    *  not inherit whatever was left of the first one's two seconds - and a page

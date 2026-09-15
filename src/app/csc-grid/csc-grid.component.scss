@@ -789,7 +789,11 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
 .csc-grid-inner.csc-reveal-edits .csc-data-cell.csc-cell-editable .csc-cell-edit-btn {
   display: inline-flex; animation: cscIndicatorIn .22s ease;
 }
-/* Simplified Editable (Selective): same window as above, painted darker.
+/* Simplified Editable (Selective) - NOT a window like the flash above.
+   .csc-reveal-selective is on for as long as the section is, so everything
+   under it is a PERMANENT state: an editable cell looks editable the whole time
+   it is on screen, and there is never a moment where it becomes
+   indistinguishable from a read-only one because a timer elapsed.
    .csc-cell-editable is the only thing choosing cells in every selector here -
    it comes straight from isCellEditable(row, field), so a highlighted cell is
    an editable cell by construction and editability is never restated in CSS.
@@ -801,8 +805,10 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
    any specificity outranks an inline style. The white chip the button normally
    sits on would read as a hole punched in the cell, so it goes transparent, and
    hover feedback becomes a white wash instead of a pale blue one. */
+/* No cscIndicatorIn here, unlike the flash rule above: a steady state should
+   not re-announce itself with motion every time a row is rendered. */
 .csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-cell-edit-btn {
-  display: inline-flex; animation: cscIndicatorIn .22s ease;
+  display: inline-flex;
   color: #fff !important; background: transparent;
 }
 .csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-cell-edit-btn:hover {
@@ -826,6 +832,35 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
    Recoloured, never removed: white here is 7.3:1, well past the 3:1 WCAG
    1.4.11 asks of a focus indicator. */
 .csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable:focus-visible {
+  outline-color: #fff;
+}
+/* The EDITOR states its own colours instead of borrowing the UA's.
+   .csc-edit-input declares neither color nor background, so an open editor is
+   readable only for as long as the browser's form-control defaults beat what it
+   inherits - and on a revealed cell what it inherits is white. `color: #fff` is
+   the smaller half of that: -webkit-text-fill-color is ALSO inherited, and it
+   overrides color outright. Chrome happens to reset both for form controls, so
+   the editor looks fine here; an engine or a forced-colors / dark-theme mode
+   that does not reset them renders the value white on white and the field looks
+   empty. Declared explicitly, readability stops depending on that.
+   #222 is the shell's own body colour - the same ink every non-editable cell
+   already uses - so the editor reads identically wherever it opens. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-edit-input {
+  color: #222; -webkit-text-fill-color: #222; caret-color: #222; background: #fff;
+}
+/* Selected text is the state the editor OPENS in - startCellEdit selects the
+   whole value - so it is the one that must not be left to inherit either. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-edit-input::selection {
+  background: #cfe2ee; color: #222; -webkit-text-fill-color: #222;
+}
+/* Same trap one level down, for the EDITOR rather than the cell. The input's
+   focus ring is #008996 and outline-offset draws it OUTSIDE the input - so on a
+   revealed cell it lands on #006069 at 1.74:1 and is effectively invisible,
+   well under the 3:1 WCAG 1.4.11 asks of a focus indicator. Recoloured, never
+   removed, and only where the dark background actually is: white here is 7.3:1.
+   The input keeps its own white fill and teal border, so the field is still
+   delimited exactly as it is everywhere else. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-edit-input:focus {
   outline-color: #fff;
 }
 /* The dirty corner is drawn in #008996 too and would vanish the same way. The
