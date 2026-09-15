@@ -63,10 +63,17 @@
    corner, so it reads as a mark ON the grid rather than a control beside it.
    No circle, no border, no backing - fully transparent, so the table's own
    corner shows through the glyph.
-   Offset is half the icon, which is what puts its centre exactly on the corner;
-   it has to track the svg size below. */
+   Offset lands the pencil's NIB on the corner, not the icon's centre. Half the
+   icon (-11px) centred the 22px BOX there, which left the point itself 6.5px
+   down and to the right - poking into the header instead of marking the corner.
+   Derivation, so it can be redone if the svg changes: the nib vertex is at
+   (3.3, 12.7) in a 16-unit viewBox rendered at 22px, so 1.375px per unit. The
+   scaleX(-1) below mirrors x, putting the nib at (16-3.3)x1.375 = 17.46px from
+   the box's left edge, and 12.7x1.375 = 17.46px from its top - identical only
+   because 16-3.3 happens to equal 12.7. Rounded to 17.5px; the 0.04px it gives
+   up is well under a device pixel. */
 .csc-editable-badge {
-  position:absolute; top:-11px; left:-11px; z-index:3;
+  position:absolute; top:-17.5px; left:-17.5px; z-index:3;
   display:flex; align-items:center; justify-content:center;
   background:transparent;
 }
@@ -781,6 +788,51 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
    .csc-cell-edit-btn as well. */
 .csc-grid-inner.csc-reveal-edits .csc-data-cell.csc-cell-editable .csc-cell-edit-btn {
   display: inline-flex; animation: cscIndicatorIn .22s ease;
+}
+/* Simplified Editable (Selective): same window as above, painted darker.
+   .csc-cell-editable is the only thing choosing cells in every selector here -
+   it comes straight from isCellEditable(row, field), so a highlighted cell is
+   an editable cell by construction and editability is never restated in CSS.
+   The combo chevron is covered for free: that button also carries
+   .csc-cell-edit-btn. */
+/* The pencil and the combo chevron both carry .csc-cell-edit-btn, so both turn
+   white from one rule. !important is load-bearing here and nowhere else in this
+   file: the button binds [style.color]="accent()" INLINE, and no selector of
+   any specificity outranks an inline style. The white chip the button normally
+   sits on would read as a hole punched in the cell, so it goes transparent, and
+   hover feedback becomes a white wash instead of a pale blue one. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-cell-edit-btn {
+  display: inline-flex; animation: cscIndicatorIn .22s ease;
+  color: #fff !important; background: transparent;
+}
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable .csc-cell-edit-btn:hover {
+  background: rgba(255,255,255,0.18);
+}
+/* Painted like a deliberate selected state rather than a tint - WCAG 1.4.1 is
+   still satisfied by the icon above, the colour is not carrying the fact alone.
+   #006069 is the accent #008996 taken down in LIGHTNESS only: both are
+   hsl(185, 100%, ...), so this is a shade of the theme's own teal and not a new
+   brand colour. 7.3:1 against white, which clears AAA for body text.
+   Solid and OPAQUE, which also settles the frozen case: a pinned cell takes its
+   opacity from `background: inherit` (see the pinned rules above), and an
+   opaque colour is the one thing that can replace that without letting the
+   scrolling columns show through. Being opaque it also lands identically on
+   plain, zebra, hovered and selected rows - nothing underneath reaches it.
+   No animation on purpose: fading the cell would fade its text with it. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable {
+  background: #006069; color: #fff;
+}
+/* The ring is #008996, which against #006069 is 1.75:1 - present but invisible.
+   Recoloured, never removed: white here is 7.3:1, well past the 3:1 WCAG
+   1.4.11 asks of a focus indicator. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable:focus-visible {
+  outline-color: #fff;
+}
+/* The dirty corner is drawn in #008996 too and would vanish the same way. The
+   cell can be edited AND revealed at once, so the marker is repainted rather
+   than left to disappear for two seconds. */
+.csc-grid-inner.csc-reveal-selective .csc-data-cell.csc-cell-editable.csc-cell-dirty::after {
+  border-right-color: #fff;
 }
 @keyframes cscIndicatorIn { from { opacity: 0; } to { opacity: 1; } }
 .csc-cell-edit-btn:hover { background: #EBF6FD; }

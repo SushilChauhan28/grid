@@ -52,6 +52,48 @@ This is why the row select checkbox carries a **flipping name**
 the user in this navigation model. `role="checkbox"` + `aria-checked` stay for
 browse-mode reading and automated checks.
 
+**State reaches the user through the focused CELL, never through the checkbox
+inside it.** The two constraints above describe the same trap from two sides, so
+the rule they imply is written out here once:
+
+- Grid navigation focus stays on `gridcell` / `columnheader`. Nothing else in
+  the grid body is a tab stop.
+- The embedded checkbox stays non-focusable. Do **not** move the roving
+  `tabindex` onto it — that is what killed arrow-key navigation on the
+  select-all cell.
+- Do **not** change the cell's role to `checkbox` to make the state announce.
+  Two separate walls: a `role="row"` may only own `gridcell` / `columnheader` /
+  `rowheader`, so changing it breaks `aria-colindex`, the arrow-key model and
+  the automatic focus-mode switch NVDA gives those roles; and `aria-checked` is
+  not a supported state of `gridcell` anyway (`aria-selected` is, and rows
+  already carry it — a second checked channel on the cell would be free to
+  disagree with it).
+- So any state that must be heard in focus mode belongs in the **focused cell's
+  accessible name or description**. It must not be left to a non-focused
+  descendant's `aria-checked` and hoped for.
+
+`role="checkbox"` + `aria-checked` still stay on the control. They are not dead:
+browse mode reads them correctly and automated checks rely on them. They are
+simply unreachable in the one mode grid navigation puts the user in.
+
+What each control uses today:
+
+- **Row select** — flipping accessible name on the checkbox
+  ("Select X" / "Deselect X"), read out of cell content.
+- **Header select-all** — the cell has no `aria-label` on purpose, so its name
+  comes from content ("Select all rows"); the tri-state is carried by
+  `aria-describedby` → `selectall-count-desc` ("No rows selected" / "2 of 40
+  rows selected" / "All 40 rows selected"). Pin state rides on the same cell's
+  `aria-description` for the same reason — a label there would replace the
+  content-derived name and take the count with it.
+
+Caveat worth knowing before editing this cell: the row-level behaviour was
+verified with NVDA, but the header lead cell's source comment claims the
+embedded checkbox "is announced from content — role, checked/mixed state",
+which contradicts the focus-mode constraint above. Both cannot be true. Treat
+the header as **unverified** and re-test with NVDA before relying on either
+reading.
+
 **Never bake a role word into an accessible name.** "Deselect checkbox X" would
 double-announce as "Deselect checkbox X, checkbox". The role attribute already
 supplies it.

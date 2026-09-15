@@ -23,7 +23,7 @@ export interface GridColumnDef {
   /** Drives typed comparators. Omitted means string. */
   type?: 'string' | 'number' | 'date' | 'datetime' | 'enum';
 }
-export type Section = 'basic' | 'advanced' | 'editable' | 'simple' | 'expandable' | 'all';
+export type Section = 'basic' | 'advanced' | 'editable' | 'simple' | 'simple-selective' | 'expandable' | 'all';
 
 export interface NavItem { key:string; label:string; on:boolean; bar:string; bg:string; color:string; weight:string; }
 

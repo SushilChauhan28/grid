@@ -123,7 +123,34 @@ function makeRows(): CscRow[] {
 /** One dataset, handed to every section as the SAME reference. Sections fork it
  *  only when they mutate it, so loading costs nothing extra. */
 function seedBySection(rows: CscRow[]): Record<Section, CscRow[]> {
-  return { basic: rows, advanced: rows, editable: rows, simple: rows, expandable: rows, all: rows };
+  return { basic: rows, advanced: rows, editable: rows, simple: rows, 'simple-selective': rows,
+           expandable: rows, all: rows };
+}
+
+/**
+ * DEMO DATA for the selective variant: which individual cells are editable.
+ *
+ * Real editability would come from the record - a locked field, a workflow
+ * state, a permission. There is no such flag in this dataset, so the demo
+ * derives one, and it has to look like real data rather than a pattern: some
+ * rows have nothing editable, some a single cell, some several, and 'country'
+ * is editable everywhere so a whole-column case is on screen too.
+ *
+ * DETERMINISTIC, and that is the point, not an implementation detail. The
+ * answer is a hash of the row's stable id and the field name, so it never
+ * depends on where the row is sitting: sort it, filter it, page past it and
+ * back, and the same cells are editable. A random draw would have re-dealt
+ * editability under the user on every render - and, worse, a cell could have
+ * lit up as editable and then refused to open.
+ */
+const DEMO_EDITABLE_EVERYWHERE = new Set(['country']);
+function demoCellEditable(rowId: string, field: string): boolean {
+  if (DEMO_EDITABLE_EVERYWHERE.has(field)) return true;
+  // FNV-1a over "rowId::field" - cheap, no state, same answer every call.
+  let h = 2166136261;
+  const s = rowId + '::' + field;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) % 100 < 30;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -210,7 +237,8 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   /** Selection is per-section, not global: checking rows in Basic must not
    *  show them checked in Advanced / Editable / Expandable. */
   private _selectedBySection = signal<Record<Section, Record<string, boolean>>>({
-    basic: {}, advanced: {}, editable: {}, simple: {}, expandable: {}, all: {},
+    basic: {}, advanced: {}, editable: {}, simple: {}, 'simple-selective': {},
+    expandable: {}, all: {},
   });
   selected = computed(() => this._selectedBySection()[this.section()]);
   page     = signal(0);
@@ -266,26 +294,74 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (focusWasInNav) this.focusAfterRender('csc-sidebar-toggle');
   }
 
+  /** Is a reveal window open? One boolean, not a set of cells: WHICH cells light
+   *  is never stored here. The CSS targets .csc-cell-editable, which the row
+   *  view model puts on a cell straight from isCellEditable(row, field) - so the
+   *  highlight cannot name a cell that is not editable, however the two drift.
+   *  This only says "a window is open", and for how long. */
   revealEdits = signal(false);
   private _revealTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly revealMs = 2000;
 
-  /** Restarts the window rather than stacking timers, so a second edit does not
-   *  inherit whatever was left of the first one's two seconds. */
-  /** Corner badge activation - mouse click or, because it is a real button in
-   *  this variant, Enter and Space. */
+  /** Editable VALUE cells on the page right now. Action columns are excluded -
+   *  they hold controls, not values - which is also what the badge's enabled
+   *  state is keyed off. */
+  editableCellCount = computed(() => {
+    const fields = this.visibleFields().filter(f => !this.actionKindOf(f));
+    return this.viewRows().reduce(
+      (n, r) => n + fields.filter(f => this.isCellEditable(r.id, f)).length, 0);
+  });
+  /** Nothing to show, so the badge says so by being disabled rather than by
+   *  doing nothing when pressed. */
+  revealBadgeDisabled = computed(() => this.editableCellCount() === 0);
+
+  /** Corner badge - the MANUAL half of the discovery cue. Same window, same
+   *  timer and same editability source as the automatic one below; only the
+   *  trigger differs.
+   *
+   *  Purely visual: nothing enters edit mode, no value changes, no combo opens,
+   *  and focus stays on the badge. */
   revealEditableFields(): void {
     this.flashEditAffordances();
-    const names = this.visibleFields()
-      .filter(f => !this.actionKindOf(f) && this.isFieldEditable(f))
-      .map(f => this.colLabel(f));
-    // The badge is a property of the GRID, not of one column, so the useful
-    // thing to say is which columns it applies to.
-    this.announceService.announce(names.length
-      ? 'Editable columns: ' + names.join(', ')
-      : 'No editable columns are currently shown');
+    const n = this.editableCellCount();
+    // A count, not a roll-call. Naming every highlighted cell would be a long
+    // unusable announcement, and the per-cell fact is already on each cell's
+    // own aria-description for anyone who arrows onto it.
+    this.announceService.announce(
+      n ? n + ' editable cells on this page' : 'No editable cells on this page');
   }
 
+  /**
+   * The AUTOMATIC half: entering the section or changing page flashes the
+   * editable cells once, so a user arriving on a page can see what it offers
+   * without hunting.
+   *
+   * An effect with exactly three dependencies - section, page, page size - is
+   * what keeps this to real data-view transitions. Change detection does not
+   * re-run it; hover, focus, arrow keys and mouse movement touch none of these
+   * signals; sorting re-orders the same page and touches none of them either.
+   * The body is untracked so that reading the rows cannot enrol the whole
+   * dataset as a dependency, which would flash the grid on every edit.
+   *
+   * Deliberately silent. It fires on every page turn, and a page turn already
+   * announces "Showing page 2 of 1000" - adding a second announcement to that
+   * would be noise. The badge is the on-demand, announced route.
+   */
+  private readonly autoRevealOnPageEntry = effect(() => {
+    const section = this.section();
+    this.page();
+    this.pageSize();
+    if (section !== 'simple-selective') return;
+    untracked(() => {
+      if (!this.editableCellCount()) return;
+      this.flashEditAffordances();
+      this.cdr.markForCheck();
+    });
+  });
+
+  /** Restarts the window rather than stacking timers, so a second trigger does
+   *  not inherit whatever was left of the first one's two seconds - and a page
+   *  transition cancels the outgoing page's reveal instead of racing it. */
   private flashEditAffordances(): void {
     if (this._revealTimer) clearTimeout(this._revealTimer);
     this.revealEdits.set(true);
@@ -335,7 +411,8 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  no section component, so one shared map showed Editable's markers in Basic
    *  on the very same row id. */
   private _dirtyBySection = signal<Record<Section, Record<string, boolean>>>({
-    basic: {}, advanced: {}, editable: {}, simple: {}, expandable: {}, all: {},
+    basic: {}, advanced: {}, editable: {}, simple: {}, 'simple-selective': {},
+    expandable: {}, all: {},
   });
   dirtyCells = computed(() => this._dirtyBySection()[this.section()]);
   private updateDirty(fn: (m: Record<string, boolean>) => Record<string, boolean>): void {
@@ -347,15 +424,37 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  Per section too: sections now hold different values for the same cell, so
    *  one shared baseline would compare an edit against another section's data. */
   private _originalBySection: Record<Section, Record<string, string>> = {
-    basic: {}, advanced: {}, editable: {}, simple: {}, expandable: {}, all: {},
+    basic: {}, advanced: {}, editable: {}, simple: {}, 'simple-selective': {},
+    expandable: {}, all: {},
   };
   private get _original(): Record<string, string> {
     return this._originalBySection[this.section()];
   }
 
-  /** Column-level editability. Undefined means editable (opt-out, not opt-in). */
+  /** Column-level editability. Undefined means editable (opt-out, not opt-in).
+   *  This is the COLUMN's opt-out only; it cannot say "this one cell". Ask
+   *  isCellEditable below for the real answer about a cell. */
   isFieldEditable(field: string): boolean {
     return this.colDefs().find(c => c.field === field)?.editable !== false;
+  }
+
+  /**
+   * THE source of truth for "can this cell be edited", at row+field.
+   *
+   * One predicate, two consumers that must never disagree: whether the cell can
+   * actually enter edit mode (startCellEdit, and Enter in the key handler), and
+   * whether it gets the temporary visual indication (via cell.editable, which
+   * is what puts .csc-cell-editable on the element the CSS targets). A cell that
+   * lights up is therefore editable by construction - there is no second list to
+   * drift out of step.
+   *
+   * Action columns can never be editable: they hold controls, not values.
+   */
+  isCellEditable(rowId: string, field: string): boolean {
+    if (!this.canEdit() || this.actionKindOf(field) || !this.isFieldEditable(field)) return false;
+    // Only the selective demo varies per cell. Every other section keeps the
+    // column-level answer it has always had, so none of them change.
+    return this.isSelectiveReveal() ? demoCellEditable(rowId, field) : true;
   }
 
   /** Fields whose editor is a dropdown. Simplified Editable honours the
@@ -491,6 +590,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     advanced:   defaultSectionState(),
     editable:   defaultSectionState(),
     simple:     defaultSectionState(),
+    'simple-selective': defaultSectionState(),
     expandable: defaultSectionState(),
     all:        defaultSectionState(ALL_FEATURE_COLUMNS.map(c => c.field)),
   });
@@ -503,6 +603,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   private _colWidthsBySectionSig = signal<Record<Section, Record<string, number>>>({
     basic: this.autoWidths(), advanced: this.autoWidths(),
     editable: this.autoWidths(), simple: this.autoWidths(),
+    'simple-selective': this.autoWidths(),
     expandable: this.autoWidths(), all: this.autoWidths(),
   });
   resizeModeField = signal<string | null>(null); // currently in keyboard resize mode
@@ -690,8 +791,17 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   isAdvanced   = computed(() => this.section() === 'advanced');
   isEditable   = computed(() => this.section() === 'editable');
   /** Simplified Editable: same editing behaviour, but every column-layout
-   *  control lives in the Choose columns dialog instead of the header. */
-  isSimple     = computed(() => this.section() === 'simple');
+   *  control lives in the Choose columns dialog instead of the header.
+   *  Covers BOTH simplified variants on purpose. 'simple-selective' is the same
+   *  grid in every respect except what the corner badge reveals, so widening
+   *  this one predicate hands it the whole simplified layout - decluttered
+   *  header, table-style chooser, no kebab, no header drag - without touching
+   *  any of the call sites. The one thing that differs is gated on
+   *  isSelectiveReveal below, so 'simple' itself is untouched. */
+  isSimple     = computed(() => this.section() === 'simple' || this.isSelectiveReveal());
+  /** Simplified Editable (Selective): the corner badge reveals only the CURRENT
+   *  row's editable cells instead of every editable cell in the grid. */
+  isSelectiveReveal = computed(() => this.section() === 'simple-selective');
   isExpandable = computed(() => this.section() === 'expandable');
   isAllFeatures = computed(() => this.section() === 'all');
 
@@ -839,15 +949,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     advanced:   { title: 'Advanced Features', subtitle: 'Adds pagination, a column menu (pin, autosize, reset), per-column filtering with a live result count, and status confirmations for every action.' },
     editable:   { title: 'Editable Grid',     subtitle: 'Inline row editing with dedicated Edit and Delete columns. Press Enter to save, Escape to cancel.' },
     simple:     { title: 'Simplified Editable Grid', subtitle: 'Same inline editing, with a decluttered header: columns carry only their label, sort and filter. Visibility, order, pinning and autosize all move into the Choose columns dialog.' },
+    'simple-selective': { title: 'Simplified Editable Grid (Selective)', subtitle: 'The same simplified grid, but the corner pencil reveals only the editable cells of the row you are on, rather than every editable cell at once.' },
     expandable: { title: 'Expandable Rows',   subtitle: 'Each record expands to reveal a detail section with registered agent, jurisdiction, filing status, and last-updated metadata.' },
     all:        { title: 'All Features',      subtitle: 'Every capability in one grid over a live paging API: 10,000+ records with virtual scrolling, server-side search, filtering and multi-column sort, inline editing, lazy-loaded detail panels, export, and full keyboard and screen reader support.' },
   }[this.section()]));
 
   navItems = computed((): NavItem[] => {
     const s = this.section(), a = this.accent();
-    return (['basic','advanced','editable','simple','expandable','all'] as Section[]).map((k, i) => ({
+    return (['basic','advanced','editable','simple','simple-selective','expandable','all'] as Section[]).map((k, i) => ({
       key: k,
-      label: ['Basic usage','Advanced features','Editable','Simplified editable','Expandable','All features'][i],
+      label: ['Basic usage','Advanced features','Editable','Simplified editable','Simplified editable (selective)','Expandable','All features'][i],
       on: s === k,
       bar: s === k ? a : 'transparent',
       bg: s === k ? '#eef6f7' : '#fff',
@@ -1084,7 +1195,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
           } satisfies CellView;
         }
         const isLink = field === 'doc';
-        const editable = this.canEdit() && this.isFieldEditable(field);
+        const editable = this.isCellEditable(r.id, field);
         // Cell-level edit mode: only THIS cell is in edit mode, not the row.
         const cellEditing = editable && edCell === r.id + '::' + field;
         const isCellActive = ark === r.id && ack === field;
@@ -1205,6 +1316,20 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   expandColHeaderDesc = computed(() => this.allExpanded()
     ? 'Press Enter to collapse all rows.'
     : 'Press Enter to expand all rows.');
+  /** Pin state for the lead header, and the only header cell that has to carry
+   *  it on the DESCRIPTION rather than the label. Every other header names
+   *  itself with aria-label and appends ", pinned left" there; this cell has no
+   *  aria-label on purpose - its name is computed from the checkbox inside it,
+   *  which is what carries the tri-state and the "2 of 40 rows selected" count.
+   *  An aria-label here would REPLACE that name and take both with it. The
+   *  description is additive, so the announcement keeps everything and gains the
+   *  pin state at the end. Without this the Select column was frozen left out of
+   *  the box (see defaultPins) and the only frozen column that never said so.
+   *  Same two words as the label path, so the two channels cannot drift. */
+  leadColHeaderDesc = computed(() => {
+    const pin = this.pinnedCols()['lead'];
+    return pin ? 'pinned ' + pin : null;
+  });
   /** Rows the select-all checkbox governs. In server mode that is the whole
    *  matching set, which is never fully loaded, so the count comes from the
    *  selection map and the total from the server rather than from baseRows. */
@@ -1842,7 +1967,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   private clearAllSelections(): void {
-    this._selectedBySection.set({ basic: {}, advanced: {}, editable: {}, simple: {}, expandable: {}, all: {} });
+    this._selectedBySection.set({ basic: {}, advanced: {}, editable: {}, simple: {}, 'simple-selective': {}, expandable: {}, all: {} });
   }
 
   /** Rows themselves are shared, so a delete must drop those ids from every
@@ -3404,7 +3529,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  belong to the text caret, which is why cell-to-cell movement is only
    *  available in navigation mode. */
   startCellEdit(rowId: string, field: string): void {
-    if (!this.isFieldEditable(field)) return;
+    if (!this.isCellEditable(rowId, field)) return;
     const r = this.rowById(rowId); if (!r) return;
     const k = this.ck(rowId, field);
     // Clicking straight from one cell into another must not leave the first
@@ -3415,9 +3540,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.editingCell.set(k);
     this.draft.set(String((r as any)[field] ?? ''));
     const combo = this.comboFields().has(field);
+    // ", editable" only in the selective variant, and only here. That variant
+    // makes editability a thing the user goes looking for - the badge lights a
+    // row for two seconds and then the evidence is gone - so the confirmation
+    // belongs at the moment the edit actually opens. It is folded into the one
+    // existing announcement rather than added as a second one, which is what
+    // would otherwise reach a screen reader as "editable" twice.
+    const editableNote = this.isSelectiveReveal() ? ', editable' : '';
     this.announceService.announce(combo
-      ? 'Editing ' + this.colLabel(field) + '. Type to filter, arrow keys to choose, Enter to save, Escape to cancel.'
-      : 'Editing ' + this.colLabel(field) + '. Press Enter to save, Escape to cancel.');
+      ? 'Editing ' + this.colLabel(field) + editableNote + '. Type to filter, arrow keys to choose, Enter to save, Escape to cancel.'
+      : 'Editing ' + this.colLabel(field) + editableNote + '. Press Enter to save, Escape to cancel.');
     setTimeout(() => {
       const cell = document.getElementById('gc-' + rowId + '-' + field);
       const input = cell?.querySelector<HTMLInputElement>('input.csc-edit-input');
@@ -3830,11 +3962,16 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (colKey === 'expand-col') { this.toggleExpand(rowKey); return; }
     if (colKey === 'doc') { this.showToast('Opening document ' + row.doc); return; }
     if (colKey === 'delete-col') { this.openDeleteConfirm(rowKey); return; }
-    if (this.canEdit() && this.isFieldEditable(colKey)) { this.startCellEdit(rowKey, colKey); return; }
+    if (this.isCellEditable(rowKey, colKey)) { this.startCellEdit(rowKey, colKey); return; }
   }
 
   onLeadHeaderFocus(): void { if (this.activeRowKey() !== 'header' || this.activeColKey() !== 'lead') { this.activeRowKey.set('header'); this.activeColKey.set('lead'); } }
-  onCellFocus(rowId: string, colId: string): void { if (this.activeRowKey() !== rowId || this.activeColKey() !== colId) { this.activeRowKey.set(rowId); this.activeColKey.set(colId); } }
+  onCellFocus(rowId: string, colId: string): void {
+    if (this.activeRowKey() !== rowId || this.activeColKey() !== colId) {
+      this.activeRowKey.set(rowId); this.activeColKey.set(colId);
+    }
+  }
+
 
   // ── CRUD: Add ─────────────────────────────────────────────────────────────
   openAddModal(): void {
