@@ -503,7 +503,7 @@
                      [style.opacity]="col.dragOpacity"
                      (blur)="onTipLeave()"
                      (focus)="onCellFocus('header', col.field); onTipEnter($any($event.currentTarget))"
-                     (click)="!_isDragging && sortBy(col.field, $event.shiftKey)"
+                     (click)="!_isDragging && !_resizeClickGuard && sortBy(col.field, $event.shiftKey)"
                      (dragstart)="onColDragStart(col.field, $event)"
                      (dragend)="onColDragEnd()">
 
@@ -583,7 +583,7 @@
                          aria-valuemax="800"
                          tabindex="-1"
                          title="Drag to resize. Focus header and press Shift+R for keyboard resize."
-                         (mousedown)="startResize(col.field, $event); $event.stopPropagation()"
+                         (pointerdown)="startResize(col.field, $event)"
                          (click)="$event.stopPropagation()"
                          (keydown.escape)="exitResizeMode(); $event.stopPropagation()">
                       <span class="csc-resize-grip"></span>

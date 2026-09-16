@@ -1754,6 +1754,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     clearTimeout(this._toastTimer);
     if (this._revealTimer) clearTimeout(this._revealTimer);
     this.cancelAutoScroll();
+    // A resize in progress holds document listeners and body userSelect; the
+    // view is already gone, so clean up without rendering.
+    this._pointerResize?.end(false);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -2903,12 +2906,41 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.resizeGuideX.set(cell.getBoundingClientRect().right - inner.getBoundingClientRect().left);
   }
 
-  startResize(field: string, e: MouseEvent): void {
+  /** The one pointer resize in progress, or null. `end` is idempotent: pointerup,
+   *  lostpointercapture and teardown can all reach it for the same resize. */
+  private _pointerResize: { pointerId: number; end: (render?: boolean) => void } | null = null;
+  /** True from the start of a pointer resize until the task after it ends.
+   *  The header sorts on click, and the click a resize produces lands on the
+   *  header whenever the pointer is released over it rather than over the
+   *  handle - which is exactly what happens once the column hits its minimum
+   *  width and stops following the pointer. Pointer capture retargets that
+   *  click to the handle in Chromium, but that retargeting is not something
+   *  every engine promises, so the header refuses it here too. The click is
+   *  dispatched in the same task as pointerup, so clearing on a timeout lets
+   *  the very next real click sort as usual. */
+  protected _resizeClickGuard = false;
+
+  /** Pointer Events, not mouse events: a touch contact never produces mousemove
+   *  while the finger is moving (the compatibility mouse events only arrive,
+   *  all at once, after a tap), so the mouse-only version could not be dragged
+   *  on a touch screen at all. One path now serves mouse, touch and pen. */
+  startResize(field: string, e: PointerEvent): void {
+    // One resize at a time; ignore a second finger, a pen's barrel button and a
+    // right/middle mouse press rather than letting any of them take over.
+    if (this._pointerResize || !e.isPrimary || e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
+    const handle = e.currentTarget as HTMLElement;
+    const pointerId = e.pointerId;
     const startX = e.clientX, w0 = this._colWidths[field] || this.measureColumnWidth(field) || 120;
     const s = this.section();
     this.updateResizeGuide(field);
-    const onMove = (ev: MouseEvent) => {
+    // Capture keeps the stream coming once the finger or cursor leaves an
+    // 18px handle, and sends the closing click to the handle instead of the
+    // header underneath. A failure is not fatal: the listeners below are on the
+    // document, so an uncaptured mouse still resizes exactly as it used to.
+    try { handle.setPointerCapture(pointerId); } catch {}
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
       const nw = Math.max(MIN_COL_W, w0 + (ev.clientX - startX));
       this.patchColWidth(s, field, nw);
       this.clearAutoFit(s, field); // manual resize -> autosize checkmark off
@@ -2918,16 +2950,30 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       this.updateResizeGuide(field);
       this.cdr.detectChanges();
     };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+    const onEnd = (ev: PointerEvent) => { if (ev.pointerId === pointerId) end(); };
+    // pointercancel keeps the width reached so far, as releasing the mouse
+    // always has - the browser taking the gesture over for a vertical scroll
+    // is not a request to undo the resize.
+    const end = (render = true) => {
+      if (this._pointerResize?.pointerId !== pointerId) return;
+      this._pointerResize = null;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+      document.removeEventListener('lostpointercapture', onEnd);
+      try { if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId); } catch {}
       document.body.style.userSelect = '';
       this.resizeGuideX.set(null);
-      this.cdr.detectChanges();
+      setTimeout(() => { this._resizeClickGuard = false; });
+      if (render) this.cdr.detectChanges();
     };
+    this._pointerResize = { pointerId, end };
+    this._resizeClickGuard = true;
     document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+    document.addEventListener('lostpointercapture', onEnd);
   }
 
   // ── Column resize (keyboard) ──────────────────────────────────────────────
@@ -2994,6 +3040,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     // the markup. Guarded at all three points because each is an entry: start
     // sets the payload, over enables the drop, drop performs it.
     if (!this.canReorder()) return;
+    // The resize handle sits inside the draggable header, and cancelling
+    // pointerdown does not cancel a native drag the way cancelling mousedown did.
+    if (this._pointerResize) { e.preventDefault(); return; }
     this._isDragging = true;
     this.dragField.set(field);
     // For the auto-scroll loop - see trackDragPointer. Adding the same listener

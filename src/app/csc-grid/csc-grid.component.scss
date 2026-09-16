@@ -331,6 +331,29 @@
 .csc-resize-grip { width:0; min-height:20px; border-left:2px solid #008996; border-right:2px solid #008996; box-sizing:content-box; padding:0 1px; border-radius:1px; opacity:1; transition:min-height .12s; }
 .csc-resize:hover .csc-resize-grip { min-height:30px; }
 .csc-resize:hover, .csc-header-resizing .csc-resize { background:rgba(0,137,150,0.12); }
+/* pan-y, not none: a horizontal gesture that starts on the handle has to reach
+   the resize instead of scrolling the grid sideways, but a vertical swipe that
+   happens to start on it should still scroll the page. Scoped to the handle -
+   touch-action only governs gestures that begin on the element, so the grid's
+   own scrolling everywhere else is untouched. */
+.csc-resize { touch-action: pan-y; }
+
+/* Finger-sized hit area on touch screens. The handle is 18px because that is
+   all the room there is: the column's own menu icon ends 6px before the
+   boundary and the next column's drag icon starts 10px after it. So the
+   target grows by a transparent ::before (the grip and the hover tint keep
+   their size and position), and the header content steps back just far
+   enough that the wider target covers no icon. `any-pointer`, so a laptop with
+   a touch screen gets it too. */
+@media (any-pointer: coarse) {
+  .csc-resize::before { content:''; position:absolute; top:0; bottom:0; left:-7px; right:-7px; } /* 32px */
+  .csc-header-content { padding-left:16px; padding-right:16px; }
+  /* The last right-pinned column is parked against the grid's edge, which
+     clips the half of the handle that overhangs it - only 9px was left to
+     touch. Its target grows inward instead, to 32px inside the grid. */
+  .csc-header-cell.csc-pinned-right:last-child .csc-resize::before { left:-23px; right:9px; }
+  .csc-header-cell.csc-pinned-right:last-child .csc-header-content { padding-right:32px; }
+}
 
 /* Full-height guide while dragging, so the drop position is readable against
    the rows and not just the header. Lives in .csc-grid-inner, which spans the
