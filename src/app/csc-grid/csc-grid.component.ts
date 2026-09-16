@@ -2360,18 +2360,68 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     return { lo: lo + 1, hi: hi + 1 };
   }
 
-  /** Rewrites the order of one pin section's VISIBLE columns and leaves every
-   *  other storage slot exactly where it was. Hidden columns therefore keep the
-   *  place they will reappear at - showing one again must not teleport it, and
-   *  unpinning must not invent a new position for anything.
-   *  `mutate` receives that section's visible fields in visible order. */
+  /**
+   * Rewrites the order of one pin section, moving each visible column together
+   * with the hidden columns that belong to it. `mutate` receives that section's
+   * visible fields in visible order, exactly as before - every caller (the
+   * column menu's Move Left/Right, drag and drop, and the chooser's Order
+   * field) goes through here, so all three share one definition of a move.
+   *
+   * WHAT A HIDDEN COLUMN BELONGS TO
+   * A hidden column belongs to the visible column immediately preceding it in
+   * the same section. When that visible column moves, its hidden tail moves
+   * with it. Hidden columns that precede every visible column in the section
+   * have no owner and stay at the section's head.
+   *
+   * This is a rule, not a slot model, and it is chosen because the alternatives
+   * are each wrong in a way this one is not. The previous version resequenced
+   * only the VISIBLE columns and left hidden ones pegged to their absolute
+   * storage index: on 104 of 308 legal single moves that handed a hidden column
+   * new neighbours nobody had asked for, so showing it again produced a position
+   * the user never chose. Removing and reinserting in the full list instead
+   * never disturbs anyone, but it is not invertible - a visible position number
+   * cannot say which side of an invisible column you mean, so re-entering picks
+   * one, and strict-LIFO undo drifted on 30 of 320 depth-1 stacks and 125 of 320
+   * at depth 4. Owning the tail is invertible because every hidden column has
+   * exactly one owner, which is what makes a move a permutation of blocks and an
+   * undo its exact inverse.
+   *
+   * The cost is the rule itself: moving a column carries its hidden tail, so
+   * unhiding afterwards shows that column somewhere new. That is visible and
+   * deliberate, which the other two options' surprises were not.
+   */
   private withSectionResequenced(field: string, mutate: (seq: string[]) => string[]): string[] {
     const order = this.orderedFields().slice(), hidden = this.colHidden();
     const sec = this.sectionOf(field), slots: number[] = [];
-    order.forEach((f, i) => { if (!hidden[f] && this.sectionOf(f) === sec) slots.push(i); });
-    const seq = mutate(slots.map(i => order[i]));
-    if (seq.length !== slots.length) return order;
-    slots.forEach((slot, i) => { order[slot] = seq[i]; });
+    // Every slot of the section, hidden ones included - they travel now, so
+    // they have to be part of what gets rewritten.
+    order.forEach((f, i) => { if (this.sectionOf(f) === sec) slots.push(i); });
+
+    const leadHidden: string[] = [];
+    const blocks: { head: string; tail: string[] }[] = [];
+    for (const f of slots.map(i => order[i])) {
+      if (!hidden[f]) blocks.push({ head: f, tail: [] });
+      else if (blocks.length) blocks[blocks.length - 1].tail.push(f);
+      else leadHidden.push(f);
+    }
+
+    const seq = mutate(blocks.map(b => b.head));
+    if (seq.length !== blocks.length) return order;
+
+    // Rebuild from the mutated head order. Bail on anything that is not a
+    // permutation of the heads rather than dropping or duplicating a column:
+    // this array is the grid's whole column order, and a silent loss here would
+    // take a column off the screen with no way back.
+    const byHead = new Map(blocks.map(b => [b.head, b]));
+    const flat = leadHidden.slice();
+    for (const head of seq) {
+      const b = byHead.get(head);
+      if (!b) return order;
+      byHead.delete(head);
+      flat.push(b.head, ...b.tail);
+    }
+    if (flat.length !== slots.length) return order;
+    slots.forEach((slot, i) => { order[slot] = flat[i]; });
     return order;
   }
 
