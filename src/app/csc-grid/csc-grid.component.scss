@@ -770,8 +770,14 @@ button:focus-visible, [tabindex]:focus-visible, a:focus-visible { outline:2px so
    Absolutely positioned on purpose: .csc-data-cell is a flex row with
    overflow:hidden, so a normal flex child would consume content width and
    push text into the clipped region (and skew autosize measurements).
-   Hidden until hover/focus so 70 visible pencils don't create noise. */
-.csc-data-cell.csc-cell-editable { position: relative; }
+   Hidden until hover/focus so 70 visible pencils don't create noise.
+   z-index:0 makes the cell a stacking context, so the button's z-index:1 below
+   only ranks it against things inside this cell (the dirty corner). Without it
+   the button competed with the frozen columns' z-index:1 at grid level, won on
+   DOM order, and painted over the delete column while its own cell scrolled
+   underneath. A frozen editable cell keeps z-index:1 - the pinned rule is
+   three classes and outranks this one. */
+.csc-data-cell.csc-cell-editable { position: relative; z-index: 0; }
 .csc-cell-edit-btn {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   display: none; align-items: center; justify-content: center;
