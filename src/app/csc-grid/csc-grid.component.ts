@@ -2546,7 +2546,13 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const vis = this.visibleFields(), cur = vis.indexOf(field);
     if (cur < 0) return; // hidden: no visible position to set
     const { lo, hi } = this.sectionBounds(field);
-    const n = parseInt(val, 10);
+    // A complete run of digits and nothing else. parseInt read the leading
+    // digits and threw the rest away, so "3.9" silently became 3 - which is the
+    // quiet re-reading the rule below exists to forbid, arriving through the
+    // parser instead of through a clamp. Everything that is not a whole number
+    // on its own now falls into the same rejection path as an out-of-range one:
+    // "3abc", "3e0", "+3", "0x4", " 3 ", full-width digits.
+    const n = /^\d+$/.test(val) ? Number(val) : NaN;
     // Rejected, never clamped. Clamping would quietly give the number the user
     // typed a different meaning, and anything outside this column's own pin
     // section would change its pin state as a side effect. Nothing is written
