@@ -87,6 +87,16 @@ interface SectionState {
   pinnedCols: Record<string, 'left' | 'right'>;
   colOrder: string[];
   colHidden: Record<string, boolean>;
+  /** Which rows are open, per section. Expandable and All Features are the only
+   *  two that can expand and they address the SAME row ids, so one shared map
+   *  meant expanding a row in one opened it in the other - and in All Features,
+   *  which is server-backed, also fetched that row's children. */
+  expanded: Record<string, boolean>;
+  /** Each section keeps its own place in the data. Shared, it was reset to 0 on
+   *  every tab switch, so no section remembered where the user had been.
+   *  All Features is excluded in practice: its page lives in the data store
+   *  (ds.page) because the server owns the window. */
+  page: number;
 }
 function defaultSectionState(order?: string[]): SectionState {
   return {
@@ -94,6 +104,7 @@ function defaultSectionState(order?: string[]): SectionState {
     filters: {}, pinnedCols: defaultPins(),
     colOrder: [...ACTION_FIELDS, ...(order ?? DEFAULT_COLS.map(c => c.field))],
     colHidden: {},
+    expanded: {}, page: 0,
   };
 }
 
@@ -169,7 +180,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
   /** Real row data from the host app. Falls back to built-in demo rows when not provided. */
   @Input() set data(v: CscRow[] | null | undefined) {
-    if (v && v.length) { this._hostRows = true; this.setRowsForAllSections(v); this.clearAllSelections(); this.page.set(0); }
+    if (v && v.length) { this._hostRows = true; this.setRowsForAllSections(v); this.clearAllSelections(); this.setPageValue(0); }
   }
   /** Host-supplied rows win over the live fetch, whichever arrives first. */
   private _hostRows = false;
@@ -241,7 +252,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     expandable: {}, all: {},
   });
   selected = computed(() => this._selectedBySection()[this.section()]);
-  page     = signal(0);
+  /** Per section - see SectionState. Written through setPageValue, never set(). */
+  page     = computed(() => this.ss().page);
+  private setPageValue(n: number): void { this.patchSS({ page: n }); }
   pageSize = signal(10);
   /** Which rows are currently in edit mode. Record (not a single id) so
    *  multiple rows can be edited concurrently — either individually (pencil
@@ -255,7 +268,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   draft       = signal<string>('');
   /** Count of rows currently being edited — drives the header Edit/Save-All/Cancel-All UI. */
   editingCount = computed(() => this.editingCell() ? 1 : 0);
-  expanded    = signal<Record<string, boolean>>({});
+  /** Per section - see SectionState. Written through setExpanded, never set(). */
+  expanded    = computed(() => this.ss().expanded);
+  private setExpanded(v: Record<string, boolean>): void { this.patchSS({ expanded: v }); }
 
   /**
    * Simplified Editable only: the corner pencil briefly shows every cell's edit
@@ -1658,7 +1673,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       if (!rows.length || this._hostRows) return;
       this.setRowsForAllSections(rows as CscRow[]);
       this.clearAllSelections();
-      this.page.set(0);
+      this.setPageValue(0);
       this.announceService.announce(rows.length.toLocaleString() + ' records loaded');
       this.scheduleDefaultAutosize(this.section());
     } catch {
@@ -1910,7 +1925,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
 
   // ── Section ───────────────────────────────────────────────────────────────
   setSection(s: Section): void {
-    this.section.set(s); this.page.set(0);
+    // No page reset here any more: each section owns its page, so arriving at a
+    // tab should put the user back where they left it.
+    this.section.set(s);
     this.editingCell.set(null); this.draft.set('');
     this.closeCombo();
     this.menuField.set(null); this.filterField.set(null);
@@ -3143,7 +3160,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       // A confirm opened from the selection has nothing left to act on.
       if (this.bulkDeleteOpen()) this.closeDeleteConfirm();
     }
-    if (field === 'expand-col') this.expanded.set({});
+    if (field === 'expand-col') this.setExpanded({});
     if (field === 'delete-col' && (this.bulkDeleteOpen() || this.deleteId() != null)) {
       this.closeDeleteConfirm();
     }
@@ -3364,7 +3381,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const sel = { ...this.selected() };
     const visible = new Set(this.rows().filter(x => Object.keys(f).every(ff => !f[ff]?.length || f[ff].includes((x as any)[ff]))).map(x => x.id));
     Object.keys(sel).forEach(id => { if (!visible.has(id)) delete sel[id]; });
-    this.patchSS({ filters: f }); this.filterField.set(null); this.page.set(0); this.setSelected(sel);
+    this.patchSS({ filters: f }); this.filterField.set(null); this.setPageValue(0); this.setSelected(sel);
     this.ensureActiveCellValid();
     this.removeFilterScrollListener();
     this.announceService.announce(this.colLabel(field) + ' filter applied. ' + this.baseRows().length + ' rows shown.');
@@ -3374,7 +3391,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   clearFilter(): void {
     const field = this.filterField()!;
     const f = { ...this.filters() }; delete f[field];
-    this.patchSS({ filters: f }); this.filterField.set(null); this.page.set(0);
+    this.patchSS({ filters: f }); this.filterField.set(null); this.setPageValue(0);
     if (this.isServerMode()) this.ds.clearFilter(field);
     this.ensureActiveCellValid();
     this.removeFilterScrollListener();
@@ -3461,7 +3478,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       this.ds.page.set(next);
       void this.ds.load(false);
     } else {
-      this.page.set(next);
+      this.setPageValue(next);
     }
     this.ensureActiveCellValid();
     this.announceService.announce('Showing page ' + (next + 1) + ' of ' + pageCount + '. ' + this.rangeText());
@@ -3487,7 +3504,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     } else {
       this.pageSize.set(size);
     }
-    this.page.set(0);
+    this.setPageValue(0);
     this.ensureActiveCellValid();
     this.closePageSizeMenu();
     this.announceService.announce(size + ' items per page. ' + this.rangeText());
@@ -3840,7 +3857,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   toggleExpand(id: string): void {
     const e = { ...this.expanded() }, will = !e[id];
     if (e[id]) delete e[id]; else e[id] = true;
-    this.expanded.set(e);
+    this.setExpanded(e);
     const row = this.rowById(id);
     // No fetch here on purpose: loadVisibleChildren owns that, keyed off the row
     // being rendered. Kicking one off here too would race it into a double fetch,
@@ -3875,14 +3892,14 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   toggleExpandAll(): void {
     if (this.expandingAll()) return;
     if (this.allExpanded()) {
-      this.expanded.set({});
+      this.setExpanded({});
       this.announceService.announce('All rows collapsed');
       return;
     }
     if (this.isServerMode()) { void this.expandAllMatching(); return; }
     const e: Record<string, boolean> = {};
     this.baseRows().forEach(r => { e[r.id] = true; });
-    this.expanded.set(e);
+    this.setExpanded(e);
     this.announceService.announce('All rows expanded');
   }
 
@@ -3899,7 +3916,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
       const ids = await this.ds.matchingIds(this.bulkCap);
       const e: Record<string, boolean> = {};
       ids.forEach(id => { e[id] = true; });
-      this.expanded.set(e);
+      this.setExpanded(e);
       const total = this.ds.total();
       const capped = ids.length < total
         ? `. Expansion is capped at ${this.bulkCap.toLocaleString()} rows, so ${(total - ids.length).toLocaleString()} matching rows are not expanded`
@@ -4045,7 +4062,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     } else {
       this.setRows([row, ...this.rows()]);
     }
-    this.nextSeq.set(seq+1); this.page.set(0);
+    this.nextSeq.set(seq+1); this.setPageValue(0);
     this.addOpen.set(false); this.addDraft.set(null); this.addError.set(null);
     this.activeRowKey.set(id); this.activeColKey.set('lead');
     this.showToast('Record added: ' + row.entity); this._lastFocused = null; this.focusAfterRender('gc-' + id + '-lead');
@@ -4101,10 +4118,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.dropFromSelections(ids);
     this.bulkDeleteOpen.set(false);
     if (ids.some(id => this.editingCell()?.startsWith(id + '::'))) { this.editingCell.set(null); this.draft.set(''); }
-    this.expanded.set({});
+    this.setExpanded({});
     this.activeRowKey.set('header');
     this.activeColKey.set(this.visibleFields()[0] ?? 'lead');
-    this.page.set(0);
+    this.setPageValue(0);
     this.showToast(n.toLocaleString() + ' record' + (n === 1 ? '' : 's') + ' deleted');
     this.announceService.announce(n.toLocaleString() + ' record' + (n === 1 ? '' : 's') + ' deleted');
     this.focusAfterRender('gc-header-' + (this.visibleFields()[0] ?? 'lead'));
@@ -4125,7 +4142,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     // actually first rather than on an element that may not exist.
     const landing = this.visibleFields()[0] ?? 'lead';
     this.activeRowKey.set('header'); this.activeColKey.set(landing);
-    this.page.set(0);
+    this.setPageValue(0);
     this.showToast(n + ' record' + (n === 1 ? '' : 's') + ' deleted');
     this.announceService.announce(n + ' record' + (n === 1 ? '' : 's') + ' deleted');
     this.focusAfterRender('gc-header-' + landing);
@@ -4220,7 +4237,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   setDataSource(id: string): void {
     this.ds.setAdapter(id);
     this.setSelected({});
-    this.expanded.set({});
+    this.setExpanded({});
     this.activeRowKey.set('header');
     this.announceService.announce('Data source changed. Loading.');
   }
