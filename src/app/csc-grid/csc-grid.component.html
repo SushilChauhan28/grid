@@ -1081,7 +1081,8 @@
 @if (comboCell()) {
   <ul class="csc-combo-popover" role="listbox" [id]="comboListId"
       [attr.aria-label]="colLabel(comboField()!) + ' options'"
-      [style.left.px]="comboX()" [style.top.px]="comboY()" [style.width.px]="comboW()">
+      [style.left.px]="comboX()" [style.top.px]="comboY()" [style.width.px]="comboW()"
+      [style.max-height.px]="comboMaxH()">
     @for (o of comboMatches(); track o.id) {
       <li role="option" [id]="o.id" class="csc-combo-option"
           [class.csc-combo-option-active]="o.active"

@@ -3539,6 +3539,10 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
    *  clicking away can never rewrite the cell. */
   private comboTouched = signal(false);
   comboX = signal(0); comboY = signal(0); comboW = signal(0);
+  /** Bound to the list's max-height so it can shrink into the space it has
+   *  and scroll inside itself, rather than overflowing the viewport. */
+  comboMaxH = signal(220);
+  private readonly comboMaxList = 220;
   private _comboScrollHandler: (() => void) | null = null;
   readonly comboListId = 'combo-listbox';
 
@@ -3572,6 +3576,15 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.comboTouched.set(false);
     this.comboActive.set(Math.max(0, opts.indexOf(this.draft())));
     this.positionCombo(rowId, field);
+    // The list does not exist yet on that first pass, so its height is unknown
+    // and positionCombo has to assume the cap. Re-place once it has rendered -
+    // the same two-step placeTip/reflowTip uses, and for the same reason.
+    setTimeout(() => {
+      if (this.comboCell() === this.ck(rowId, field)) {
+        this.positionCombo(rowId, field);
+        this.cdr.markForCheck();
+      }
+    });
     this.attachComboScrollListener(rowId, field);
     this.scrollComboOptionIntoView();
   }
@@ -3673,11 +3686,29 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     const cell = document.getElementById('gc-' + rowId + '-' + field);
     if (!cell) { this.closeCombo(); return; }
     // Matched to the column so the list never spills over its neighbours.
-    const r = cell.getBoundingClientRect(), w = r.width, h = 220;
+    const r = cell.getBoundingClientRect(), w = r.width;
     this.comboW.set(w);
     this.comboX.set(Math.max(4, Math.min(r.left, window.innerWidth - w - 8)));
-    // Flip above the cell when the list would run off the bottom.
-    this.comboY.set(r.bottom + h > window.innerHeight ? Math.max(4, r.top - h) : r.bottom);
+
+    // Measured against the LIST'S OWN height, not its max-height. Reserving the
+    // cap made a three-option list ask for 220px when it needed 91, so it
+    // flipped above a cell that had 129px free below it - and then anchored its
+    // TOP 220px up, leaving it floating 129px clear of the cell it belonged to.
+    // Both came from that one number.
+    const below = window.innerHeight - r.bottom;
+    const above = r.top;
+    const listEl = document.getElementById(this.comboListId);
+    const want = Math.min(listEl ? listEl.scrollHeight : this.comboMaxList, this.comboMaxList);
+
+    // Below by default. Flipping only buys something when the list does not fit
+    // below AND above is roomier; when neither side fits, the roomier side wins
+    // and max-height below lets the list scroll inside what it has.
+    const placeBelow = want <= below || below >= above;
+    const room = Math.max(64, Math.min(this.comboMaxList, placeBelow ? below : above));
+    this.comboMaxH.set(room);
+    // Flipped, the list hangs its BOTTOM on the cell's top edge. Anchoring its
+    // top at `r.top - cap` is what detached it from its own trigger.
+    this.comboY.set(placeBelow ? r.bottom : Math.max(4, r.top - Math.min(want, room)));
   }
 
   private attachComboScrollListener(rowId: string, field: string): void {
