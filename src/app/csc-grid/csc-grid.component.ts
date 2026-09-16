@@ -1753,6 +1753,7 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     this.removeComboScrollListener();
     clearTimeout(this._toastTimer);
     if (this._revealTimer) clearTimeout(this._revealTimer);
+    this.cancelAutoScroll();
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -2995,6 +2996,9 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
     if (!this.canReorder()) return;
     this._isDragging = true;
     this.dragField.set(field);
+    // For the auto-scroll loop - see trackDragPointer. Adding the same listener
+    // twice is a no-op, so a drag that never delivered dragend cannot stack one.
+    document.addEventListener('dragover', this.trackDragPointer, true);
     try { e.dataTransfer!.effectAllowed = 'move'; e.dataTransfer!.setData('text/plain', field); } catch {}
     this.announceService.announce('Grabbed ' + this.colLabel(field) + ' column for reordering');
   }
@@ -3111,12 +3115,103 @@ export class CscGridComponent implements OnInit, AfterViewInit, AfterViewChecked
   }
 
   private clearHeaderDrag(): void {
+    this.cancelAutoScroll();
     this._isDragging = false;
     this.dragField.set(null); this.dropTarget.set(null);
     this.dropAfter.set(false); this.dragGuideX.set(null);
   }
 
   onColDragEnd(): void { this.clearHeaderDrag(); }
+
+  /**
+   * Horizontal auto-scroll while a header column is dragged near an edge.
+   *
+   * Driven by requestAnimationFrame, not by dragover. dragover arrives on the
+   * browser's own timer and carries no new information while the pointer is
+   * still - but a pointer HELD at the edge is the whole case: the user is
+   * waiting for the grid to move, and nothing new is arriving to move it. So
+   * dragover only records where the pointer is, and the loop does the scrolling.
+   *
+   * Pointer tracking listens on the document for the length of the drag rather
+   * than on the grid. Leaving the grid is one of the conditions that has to
+   * STOP the scroll, and a listener on the grid simply falls silent then, which
+   * would leave the loop running on a stale position.
+   *
+   * Scrolling and drop resolution stay separate on purpose. Nothing here calls
+   * preventDefault or invents a target: the guide is whatever resolveInsertion
+   * says for the current pointer, including null.
+   */
+  private _autoScrollRaf: number | null = null;
+  private _dragPointer: { x: number; y: number } | null = null;
+  private readonly autoScrollBand = 48;
+  private readonly autoScrollMaxStep = 14;
+
+  private readonly trackDragPointer = (e: DragEvent): void => {
+    this._dragPointer = { x: e.clientX, y: e.clientY };
+    this.ensureAutoScroll();
+  };
+
+  /** Signed px for one frame; 0 when the pointer is outside both bands. */
+  private autoScrollStep(x: number, y: number): number {
+    const from = this.dragField();
+    // A pinned column stays inside its sticky block, which does not scroll, so
+    // moving the grid under it could never change where it lands.
+    if (!from || this.pinLeft(from) !== null || this.pinRight(from) !== null) return 0;
+    if (!this.inHeaderBand(y)) return 0;
+    const sc = this.hostEl.nativeElement.querySelector('.csc-grid-scroll') as HTMLElement | null;
+    if (!sc) return 0;
+    // The bands start where the sticky pinned blocks END, not at the container's
+    // own edges. Those blocks sit over the edges, resolveInsertion correctly
+    // refuses a pointer over them, and a band placed there would scroll the grid
+    // while the pointer was over somewhere no column may be dropped.
+    const r = sc.getBoundingClientRect();
+    let left = r.left, right = r.right;
+    for (const f of this.visibleFields()) {
+      const pinnedLeft = this.pinLeft(f) !== null, pinnedRight = this.pinRight(f) !== null;
+      if (!pinnedLeft && !pinnedRight) continue;
+      const cell = document.getElementById('gc-header-' + f);
+      if (!cell) continue;
+      const c = cell.getBoundingClientRect();
+      if (pinnedLeft) left = Math.max(left, c.right);
+      else right = Math.min(right, c.left);
+    }
+    const band = this.autoScrollBand, max = this.autoScrollMaxStep;
+    // Linear ramp with depth into the band, capped at the full band so a pointer
+    // that overshoots the edge keeps the top speed rather than stalling.
+    if (x < left + band)  return -Math.ceil(max * Math.min(band, left + band - x) / band);
+    if (x > right - band) return  Math.ceil(max * Math.min(band, x - (right - band)) / band);
+    return 0;
+  }
+
+  private ensureAutoScroll(): void {
+    if (this._autoScrollRaf !== null) return;   // at most one loop, ever
+    const p = this._dragPointer;
+    if (!p || this.autoScrollStep(p.x, p.y) === 0) return;
+    this._autoScrollRaf = requestAnimationFrame(this.autoScrollFrame);
+  }
+
+  private readonly autoScrollFrame = (): void => {
+    this._autoScrollRaf = null;
+    const from = this.dragField(), p = this._dragPointer;
+    // Self-terminating: a drag can end without dragend ever reaching us.
+    if (!from || !p) return;
+    const sc = this.hostEl.nativeElement.querySelector('.csc-grid-scroll') as HTMLElement | null;
+    const step = sc ? this.autoScrollStep(p.x, p.y) : 0;
+    if (!sc || step === 0) return;
+    const before = sc.scrollLeft;
+    sc.scrollLeft = before + step;   // the browser clamps this to its own limits
+    if (Math.abs(sc.scrollLeft - before) < 0.5) return;   // already against a limit
+    // The pointer has not moved, but the columns under it have.
+    this.showInsertGuide(this.resolveInsertion(p.x, from));
+    this.cdr.markForCheck();
+    this._autoScrollRaf = requestAnimationFrame(this.autoScrollFrame);
+  };
+
+  private cancelAutoScroll(): void {
+    if (this._autoScrollRaf !== null) { cancelAnimationFrame(this._autoScrollRaf); this._autoScrollRaf = null; }
+    this._dragPointer = null;
+    document.removeEventListener('dragover', this.trackDragPointer, true);
+  }
 
   // ── Chooser ───────────────────────────────────────────────────────────────
   openChooser(): void {
